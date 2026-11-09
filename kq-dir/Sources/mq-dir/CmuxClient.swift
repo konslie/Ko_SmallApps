@@ -1,0 +1,224 @@
+import AppKit
+import Foundation
+
+/// Lightweight wrapper around the `cmux` CLI binary.
+///
+/// We talk to cmux through its `rpc` subcommand (which proxies onto cmux's
+/// Unix socket), so this is a thin shell-out + JSON-decode layer rather
+/// than a long-lived socket client. The sidebar's "Sync" button is the
+/// only caller — manual trigger keeps the dependency cheap and avoids
+/// background polling chatter when the user isn't using cmux today.
+///
+/// All operations are synchronous (Process.run + pipe drain) but called
+/// from `Task.detached` on the UI side so the main actor never blocks
+/// on cmux startup latency.
+struct CmuxClient: Sendable {
+    /// Common install locations. `cmux.app`'s embedded binary takes
+    /// precedence so we don't accidentally hit a stale Homebrew copy.
+    private static let candidatePaths: [String] = [
+        "/Applications/cmux.app/Contents/Resources/bin/cmux",
+        "/opt/homebrew/bin/cmux",
+        "/usr/local/bin/cmux",
+    ]
+
+    /// Parent directories under which a `CMUX_BIN` override is acceptable.
+    /// Without this allowlist, a hostile process that can call
+    /// `launchctl setenv CMUX_BIN /tmp/evil` would get arbitrary code
+    /// execution every time the user clicks Sync — non-sandboxed
+    /// Developer ID builds inherit the user's full TCC grants.
+    private static let trustedBinaryRoots: [String] = [
+        "/Applications/cmux.app/",
+        "/opt/homebrew/",
+        "/usr/local/",
+    ]
+
+    /// Bundle identifiers for the cmux app on macOS, in production →
+    /// staging → debug order. `appURL()` returns the first one found.
+    private static let appBundleIdentifiers: [String] = [
+        "com.cmuxterm.app",
+        "com.cmuxterm.app.staging",
+        "com.cmuxterm.app.debug",
+    ]
+
+    /// Locate cmux.app on this machine. Tried via Launch Services
+    /// (`urlForApplication(withBundleIdentifier:)`) so a user-installed
+    /// copy in any /Applications-equivalent path resolves correctly,
+    /// then falls back to the canonical `/Applications/cmux.app` for
+    /// the case where Launch Services hasn't indexed yet.
+    static func appURL() -> URL? {
+        for id in appBundleIdentifiers {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                return url
+            }
+        }
+        let fallback = URL(fileURLWithPath: "/Applications/cmux.app")
+        if FileManager.default.fileExists(atPath: fallback.path) {
+            return fallback
+        }
+        return nil
+    }
+
+    /// Resolves the `cmux` binary on this machine. Returns nil when cmux
+    /// isn't installed — the sidebar uses that to hide the CMUX section
+    /// entirely instead of surfacing an empty / broken state.
+    static func locateBinary() -> String? {
+        if let env = ProcessInfo.processInfo.environment["CMUX_BIN"],
+           !env.isEmpty,
+           isTrustedBinary(path: env),
+           FileManager.default.isExecutableFile(atPath: env)
+        {
+            return env
+        }
+        for path in candidatePaths where FileManager.default.isExecutableFile(atPath: path) {
+            return path
+        }
+        return nil
+    }
+
+    /// True when `path` resolves under one of the trusted parent roots.
+    /// Standardizes the path first so `..` traversal can't escape the
+    /// allowlist (e.g. `/opt/homebrew/../tmp/evil`).
+    private static func isTrustedBinary(path: String) -> Bool {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        return trustedBinaryRoots.contains { standardized.hasPrefix($0) }
+    }
+
+    /// Returns the current cmux workspace list, sorted by `index`. Throws
+    /// when cmux is missing, when the rpc call fails, or when the JSON
+    /// shape is unexpected — the caller surfaces a single "couldn't
+    /// reach cmux" hint rather than reasoning about which step broke.
+    static func listWorkspaces() throws -> [CmuxWorkspace] {
+        guard let binary = locateBinary() else { throw CmuxError.notInstalled }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+
+        // If the user runs cmux in Password mode (Settings → Automation),
+        // they set CMUX_SOCKET_PASSWORD via `launchctl setenv` so it
+        // reaches GUI-launched apps too. Forward it via the child's
+        // environment rather than `--password <pw>` on argv — argv is
+        // visible to every local user via `ps -ef` for the lifetime of
+        // the child, env is not. cmux honors the env var when it's also
+        // present in the server's environment, which the launchctl path
+        // already arranges.
+        var env = ProcessInfo.processInfo.environment
+        if let pw = env["CMUX_SOCKET_PASSWORD"], !pw.isEmpty {
+            env["CMUX_SOCKET_PASSWORD"] = pw
+        }
+        process.environment = env
+        process.arguments = ["rpc", "workspace.list", "{}"]
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+
+        // Drain both pipes concurrently with the wait. Reading them only
+        // after `waitUntilExit()` would deadlock when a chatty
+        // `workspace.list` exceeds the ~64 KB pipe buffer: cmux blocks
+        // writing stdout while we block on the exit, the watchdog then
+        // fires at 5s and we'd report a spurious `timedOut`. Background
+        // threads keep both pipes flowing so the child can always finish.
+        let outBox = PipeDrainBox()
+        let errBox = PipeDrainBox()
+        let outHandle = stdout.fileHandleForReading
+        let errHandle = stderr.fileHandleForReading
+        let outThread = Thread { outBox.data = outHandle.readDataToEndOfFile() }
+        let errThread = Thread { errBox.data = errHandle.readDataToEndOfFile() }
+        outThread.start()
+        errThread.start()
+
+        // Arm a watchdog so a hung cmux socket doesn't leave the sidebar
+        // showing "Syncing…" forever. 5s is well above the 100s-of-ms a
+        // healthy cold socket takes; anything past that is a real hang.
+        let watchdog = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        watchdog.schedule(deadline: .now() + 5)
+        watchdog.setEventHandler {
+            if process.isRunning { process.terminate() }
+        }
+        watchdog.resume()
+        process.waitUntilExit()
+        watchdog.cancel()
+
+        // Let the drain threads finish flushing the closed pipes so the
+        // collected bytes are complete before we read them below.
+        while outThread.isExecuting || errThread.isExecuting { usleep(1_000) }
+
+        // SIGTERM exits with status 15 on Darwin. Distinguish that from a
+        // protocol-level error so the user gets an actionable hint.
+        if process.terminationReason == .uncaughtSignal {
+            throw CmuxError.timedOut
+        }
+
+        guard process.terminationStatus == 0 else {
+            let msg = String(data: errBox.data, encoding: .utf8) ?? ""
+            // cmux 0.63.x rejects external apps when its socket is in
+            // the default `cmuxOnly` mode — the symptom is a "Broken
+            // pipe" mid-write. Bubble up a more actionable hint instead
+            // of the raw socket error.
+            if msg.contains("Broken pipe") || msg.contains("EOF") {
+                throw CmuxError.accessDenied
+            }
+            throw CmuxError.rpcFailed(status: Int(process.terminationStatus), message: msg)
+        }
+
+        let response = try JSONDecoder().decode(WorkspaceListResponse.self, from: outBox.data)
+        return response.workspaces.sorted { $0.index < $1.index }
+    }
+}
+
+/// Box so a background drain thread can hand its collected pipe bytes
+/// back to the caller. `@unchecked Sendable` is safe because the writer
+/// thread is joined (via `isExecuting`) before any reader touches `data`.
+private final class PipeDrainBox: @unchecked Sendable {
+    var data = Data()
+}
+
+// MARK: - Wire types (only the fields we actually render)
+
+struct CmuxWorkspace: Codable, Equatable, Sendable, Identifiable {
+    let id: String
+    let ref: String
+    let index: Int
+    let title: String
+    let description: String?
+    let currentDirectory: String?
+    let selected: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, ref, index, title, description
+        case currentDirectory = "current_directory"
+        case selected
+    }
+}
+
+private struct WorkspaceListResponse: Decodable {
+    let workspaces: [CmuxWorkspace]
+}
+
+// MARK: - Errors
+
+enum CmuxError: Error, LocalizedError {
+    case notInstalled
+    case accessDenied
+    case timedOut
+    case rpcFailed(status: Int, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notInstalled:
+            return "cmux not found on this machine."
+        case .accessDenied:
+            return "cmux is set to allow only its own children. " +
+                   "Open cmux → Settings → Automation and switch Socket Control Mode away from cmuxOnly."
+        case .timedOut:
+            return "cmux did not respond within 5 seconds. " +
+                   "Try again, or quit and reopen cmux if the socket looks stuck."
+        case .rpcFailed(let status, let message):
+            let detail = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "cmux rpc failed (exit \(status))\(detail.isEmpty ? "" : ": \(detail)")"
+        }
+    }
+}

@@ -1,0 +1,120 @@
+name: mq-dir
+options:
+  bundleIdPrefix: com.konslie
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "8"
+    CODE_SIGN_STYLE: Automatic
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: 2.4.0
+
+targets:
+  mq-dir:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/mq-dir
+      - path: Sources/mqdirCore
+      - path: Resources
+        excludes:
+          - "Entitlements/**"
+    dependencies:
+      - package: MarkdownUI
+        product: MarkdownUI
+    info:
+      path: Sources/mq-dir/Info.plist
+      properties:
+        CFBundleIdentifier: com.konslie.mqdir
+        CFBundleDisplayName: kq-dir
+        NSHumanReadableCopyright: "Based on mq-dir by h5nam. Copyright © 2026 mq-dir contributors. MIT License."
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSApplicationCategoryType: public.app-category.utilities
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSDesktopFolderUsageDescription: kq-dir needs access to your Desktop to browse files there.
+        NSDocumentsFolderUsageDescription: kq-dir needs access to your Documents to browse files there.
+        NSDownloadsFolderUsageDescription: kq-dir needs access to your Downloads to browse files there.
+        NSRemovableVolumesUsageDescription: kq-dir needs access to your removable volumes to browse files there.
+        NSNetworkVolumesUsageDescription: kq-dir needs access to your network volumes to browse files there.
+    entitlements:
+      path: Resources/Entitlements/mq-dir.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.konslie.mqdir
+        PRODUCT_NAME: kq-dir
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_PREVIEWS: YES
+      configs:
+        # Local Debug builds use no signing.
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+          DEVELOPMENT_TEAM: ""
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGNING_ALLOWED: "NO"
+        Sandboxed:
+          CODE_SIGN_ENTITLEMENTS: Resources/Entitlements/mq-dir-sandboxed.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MQDIR_SANDBOXED"
+
+  mq-dir-service-tests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/mqdirAppTests
+      - path: Sources/mq-dir/CutPasteboard.swift
+      - path: Sources/mq-dir/PersistedChanges.swift
+      - path: Sources/mq-dir/WorkspaceManager.swift
+      - path: Sources/mq-dir/SidebarViewModel.swift
+      - path: Sources/mq-dir/FolderBrowserViewModel.swift
+      - path: Sources/mq-dir/PaneTabsViewModel.swift
+      - path: Sources/mq-dir/FileWorkCenter.swift
+      - path: Sources/mq-dir/DirectoryWatcher.swift
+      - path: Sources/mq-dir/CmuxClient.swift
+      - path: Sources/mq-dir/WorkspaceIntegrationClient.swift
+      - path: Sources/mq-dir/IntegrationsSidebarModel.swift
+      - path: Sources/mq-dir/TagColors.swift
+      - path: Sources/mq-dir/AppNotifications.swift
+      - path: Sources/mq-dir/ZipPreviewService.swift
+      - path: Sources/mqdirCore
+      - path: Sources/mq-dir/MarkdownImageProviders.swift
+    dependencies:
+      - package: MarkdownUI
+        product: MarkdownUI
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+
+configs:
+  Debug: debug
+  Release: release
+  Sandboxed: release
+
+schemes:
+  mq-dir:
+    build:
+      targets:
+        mq-dir: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - mq-dir-service-tests
+    archive:
+      config: Release

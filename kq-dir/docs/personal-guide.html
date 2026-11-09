@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>kq-dir 개인용 에디션 · 핵심 기능 가이드</title>
+  <style>
+    :root { color-scheme: light; --ink:#172b3a; --muted:#536675; --blue:#1761ce; --line:#dce5ec; --pale:#edf4fc; --orange:#b04e28; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; background:#edf1f4; }
+    body { margin:0; color:var(--ink); font:15px/1.7 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; word-break:keep-all; }
+    button,a { -webkit-tap-highlight-color:transparent; }
+    .controls { max-width:1120px; margin:24px auto 16px; display:flex; gap:20px; align-items:center; padding:0 8px; font-size:13px; }
+    .controls a { color:var(--muted); text-decoration:none; }
+    .controls a:hover { color:var(--blue); }
+    .controls button { margin-left:auto; border:1px solid #cbd7e2; border-radius:8px; background:white; color:var(--ink); padding:9px 14px; font:inherit; cursor:pointer; }
+    a:focus-visible,button:focus-visible { outline:3px solid #1761ce; outline-offset:4px; }
+    main { max-width:1120px; margin:auto; }
+    .page { background:#fff; margin-bottom:24px; padding:46px 58px 30px; border:1px solid var(--line); border-radius:14px; box-shadow:0 12px 40px #223b4d08; scroll-margin-top:20px; }
+    .masthead,.footer { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:800; font-size:22px; letter-spacing:-.8px; }
+    .mark { width:25px; height:25px; display:grid; grid-template-columns:1fr 1fr; gap:3px; }
+    .mark i { display:block; border-radius:2px; background:var(--blue); }
+    .mark i:last-child { opacity:.35; }
+    .edition { color:var(--muted); font-size:12px; letter-spacing:.7px; }
+    .eyebrow { color:var(--blue); font-size:12px; font-weight:750; letter-spacing:1.5px; margin:32px 0 14px; }
+    h1 { font-size:45px; line-height:1.27; letter-spacing:-2px; margin:0 0 20px; font-weight:800; }
+    h2 { font-size:31px; line-height:1.35; letter-spacing:-1.2px; margin:0 0 12px; }
+    h3 { font-size:18px; line-height:1.45; letter-spacing:-.45px; margin:0 0 8px; }
+    p { margin:0 0 12px; }
+    .lead { font-size:17px; color:var(--muted); max-width:580px; }
+    .hero { display:grid; grid-template-columns:1.05fr 1fr; gap:38px; align-items:center; margin:35px 0 28px; }
+    .hero .eyebrow { margin-top:0; }
+    .pills { display:flex; flex-wrap:wrap; gap:7px; margin-top:22px; }
+    .pill { padding:4px 10px; background:var(--pale); color:#285888; border-radius:5px; font-size:12px; font-weight:650; }
+    .mock { background:#f7f9fc; border:1px solid #cedbe6; border-radius:10px; overflow:hidden; box-shadow:0 14px 28px #294e7211; }
+    .mockbar { padding:9px 13px; background:#eaf0f6; display:flex; align-items:center; gap:5px; font-size:10px; color:#667888; }
+    .dot { width:6px; height:6px; border-radius:50%; background:#b0c0ce; }
+    .mockbar span:last-child { margin:auto; }
+    .mockbody { display:grid; grid-template-columns:73px 1fr; min-height:265px; }
+    .mockside { background:#f0f4f8; padding:13px 10px; border-right:1px solid #d8e2ec; font-size:9px; color:#5c7389; }
+    .mockside b { display:block; font-size:8px; margin-bottom:13px; color:#344f66; }
+    .mockside span { display:block; margin-bottom:10px; }
+    .gridpanes { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; background:#d8e2ec; gap:1px; }
+    .mockpane { background:white; min-width:0; }
+    .mocktabs { height:27px; background:#f7f9fb; display:flex; gap:8px; align-items:center; padding:0 9px; font-size:9px; border-bottom:1px solid #e0e7ef; }
+    .mocktabs b { color:var(--blue); border-bottom:2px solid var(--blue); height:100%; display:flex; align-items:center; }
+    .mockrows { padding:10px; color:#52677c; font-size:9px; line-height:2.3; }
+    .folder { display:inline-block; width:10px; height:7px; background:#69a3e4; border-radius:1px; margin-right:6px; position:relative; }
+    .folder:before { content:""; position:absolute; top:-2px; left:0; width:5px; height:3px; background:#69a3e4; border-radius:1px; }
+    figcaption { margin-top:11px; color:var(--muted); font-size:10px; text-align:center; }
+    figure { margin:0; }
+    .sectionline { display:flex; align-items:center; gap:10px; margin:32px 0 16px; }
+    .sectionline h2 { font-size:20px; margin:0; letter-spacing:-.6px; }
+    .four { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .gesture { border:1px solid var(--line); border-radius:9px; padding:18px 20px; }
+    .gesture .number { color:var(--blue); font-size:11px; font-weight:800; display:block; margin-bottom:6px; }
+    .gesture h3 { font-size:17px; }
+    .gesture p { color:var(--muted); font-size:13px; margin:0; }
+    .callout { background:var(--pale); border-left:3px solid var(--blue); padding:14px 18px; margin-top:18px; font-size:13px; color:#36516c; }
+    .callout strong { color:var(--ink); }
+    .footer { border-top:1px solid var(--line); margin-top:28px; padding-top:15px; color:#657888; font-size:10px; }
+    .intro { color:var(--muted); margin-bottom:24px; }
+    .shortcuts { display:grid; grid-template-columns:1fr 1fr; gap:28px; margin-top:20px; }
+    table { border-collapse:collapse; width:100%; font-size:12px; }
+    caption { text-align:left; font-weight:750; font-size:15px; margin-bottom:8px; }
+    th,td { padding:8px 0; border-bottom:1px solid #e7edf2; text-align:left; }
+    th { color:var(--muted); font-weight:500; }
+    td:last-child,th:last-child { text-align:right; white-space:nowrap; padding-left:10px; }
+    kbd { font:inherit; font-weight:650; color:#344a61; background:#f2f5f8; border:1px solid #e1e8ee; border-radius:4px; padding:1px 5px; }
+    .small { font-size:11px; color:var(--muted); }
+    .local { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:26px; padding:20px; background:#f7f9fc; border-radius:9px; }
+    .local h3 { font-size:16px; }
+    .local p { font-size:12px; color:var(--muted); margin:0; }
+    code { font:11px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; word-break:break-all; }
+    .scope { margin-top:19px; font-size:11px; color:var(--muted); }
+    .scope p { margin-bottom:7px; }
+    .scope a { color:var(--blue); }
+    @media(max-width:800px) {
+      .controls { padding:0 18px; gap:12px; } .controls a { font-size:11px; }
+      .page { border-radius:0; padding:28px 22px 24px; margin-bottom:14px; }
+      .hero,.shortcuts,.local { grid-template-columns:1fr; gap:22px; }
+      .hero { margin-top:28px; } h1 { font-size:37px; } h2 { font-size:27px; }
+      .four { grid-template-columns:1fr; }
+      .edition { font-size:10px; } .footer { align-items:flex-start; }
+    }
+    @page { size:A4; margin:12mm; }
+    @media print {
+      html,body { background:white !important; color:#172b3a !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      .controls { display:none; } main { max-width:none; }
+      .page { margin:0; padding:0; border:0; border-radius:0; box-shadow:none; break-after:page; }
+      .page:last-child { break-after:auto; }
+      .masthead { margin-bottom:20px; } .hero { gap:22px; margin:24px 0; grid-template-columns:1fr 1fr; }
+      h1 { font-size:32px; } h2 { font-size:25px; } .lead { font-size:13px; }
+      .brand { font-size:19px; } .edition { font-size:10px; }
+      .gesture { padding:14px; } .gesture h3 { font-size:15px; } .gesture p { font-size:11px; }
+      .shortcuts,.local { grid-template-columns:1fr 1fr; gap:20px; }
+      .footer { margin-top:22px; } .eyebrow { margin-top:23px; }
+      .mockbody { min-height:225px; } .mockside { font-size:8px; } .mocktabs { font-size:8px; gap:5px; padding:0 5px; }
+      .mockrows { font-size:8px; padding:8px; }
+      .gesture,.local,table { break-inside:avoid; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="controls" aria-label="문서 탐색">
+    <a href="#overview">탭 사용법</a><a href="#reference">빠른 참고</a>
+    <button type="button" onclick="window.print()">인쇄 / PDF로 저장</button>
+  </nav>
+  <main>
+    <section class="page" id="overview" aria-labelledby="title">
+      <header class="masthead"><div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>kq-dir</div><span class="edition">PERSONAL EDITION · 기능 가이드</span></header>
+      <div class="hero">
+        <div>
+          <p class="eyebrow">나의 MAC을 위한 파일 관리자</p>
+          <h1 id="title">폴더는 나란히.<br>작업은 더 빠르게.</h1>
+          <p class="lead">여러 폴더를 패널과 탭으로 펼쳐 놓고,<br>찾고, 살펴보고, 옮기는 흐름을 이어가세요.</p>
+          <div class="pills"><span class="pill">최대 4개 패널</span><span class="pill">패널별 독립 탭</span><span class="pill">작업 상태 자동 저장</span></div>
+        </div>
+        <figure>
+          <div class="mock" role="img" aria-label="즐겨찾기 사이드바와 네 개의 독립 패널로 구성된 파일 관리자 개념도">
+            <div class="mockbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>kq-dir · My workspace</span></div>
+            <div class="mockbody"><div class="mockside"><b>FAVORITES</b><span>Desktop</span><span>Downloads</span><br><b>PROJECTS</b><span>My workspace</span></div>
+              <div class="gridpanes">
+                <div class="mockpane"><div class="mocktabs"><b>Project</b><span>Assets</span><span>＋</span></div><div class="mockrows"><div><i class="folder"></i>Documents</div><div><i class="folder"></i>Images</div><div><i class="folder"></i>Source</div></div></div>
+                <div class="mockpane"><div class="mocktabs"><b>Downloads</b><span>＋</span></div><div class="mockrows"><div>brief.pdf</div><div>reference.png</div><div>notes.md</div></div></div>
+                <div class="mockpane"><div class="mocktabs"><b>Archive</b><span>＋</span></div><div class="mockrows"><div><i class="folder"></i>2026</div><div><i class="folder"></i>Previous</div></div></div>
+                <div class="mockpane"><div class="mocktabs"><b>Output</b><span>＋</span></div><div class="mockrows"><div>final.pdf</div><div>export.zip</div></div></div>
+              </div>
+            </div>
+          </div>
+          <figcaption>패널·탭 구조를 설명하는 개념도입니다. 실제 앱 화면과는 다릅니다.</figcaption>
+        </figure>
+      </div>
+      <div class="sectionline"><h2>탭을 다루는 빠른 동작</h2></div>
+      <div class="four">
+        <article class="gesture"><span class="number">01 / 폴더 → 새 탭</span><h3>폴더를 새 탭으로 열기</h3><p>리스트·트리에서 폴더를 <strong>휠클릭</strong>하거나 <strong>⌘+더블클릭</strong>하세요. 폴더를 선택한 뒤 <strong>⌘+Enter</strong>로도 열 수 있습니다.</p></article>
+        <article class="gesture"><span class="number">02 / 탭 → 닫기</span><h3>탭도 휠클릭으로 닫기</h3><p>활성 탭과 비활성 탭 모두 바로 닫습니다. 마지막 탭을 닫으면 <strong>Untitled</strong>와 <strong>Open a folder</strong> 화면이 남습니다.</p></article>
+        <article class="gesture"><span class="number">03 / 탭 → 복제</span><h3>더블클릭하면 탭 하나 더</h3><p>클릭한 탭의 바로 오른쪽에 복제 탭을 추가합니다. 현재 보고 있는 탭은 유지됩니다. 폴더·정렬·보기 방식 등 저장 가능한 탭 상태를 이어받습니다.</p></article>
+        <article class="gesture"><span class="number">04 / 빈 탭 추가</span><h3>＋ 버튼 또는 ⌘T</h3><p>탭 스트립의 <strong>＋</strong> 버튼이나 <strong>⌘T</strong>로 빈 탭을 추가합니다. 탭을 선택한 뒤 <strong>Open Folder…</strong>에서 원하는 폴더를 여세요.</p></article>
+      </div>
+      <aside class="callout"><strong>새 탭을 열어도 현재 작업은 그대로.</strong> 폴더 열기·빈 탭 생성·복제·닫은 탭 복원은 현재 보고 있는 탭을 유지합니다. 준비한 새 탭을 클릭하면 그때 전환합니다.</aside>
+      <footer class="footer"><span>kq-dir · 개인용 로컬 버전</span><span>01 / 탭 사용법</span></footer>
+    </section>
+
+    <section class="page" id="reference" aria-labelledby="reference-title">
+      <header class="masthead"><div class="brand">kq-dir</div><span class="edition">QUICK REFERENCE</span></header>
+      <p class="eyebrow">자주 쓰는 동작을 한눈에</p>
+      <h2 id="reference-title">손에 익히면 더 빨라집니다.</h2>
+      <p class="intro">새 탭 생성·폴더 새 탭 열기·복제·닫은 탭 복원은 현재 탭을 유지합니다. 전환하려면 탭을 클릭하세요. 아래는 기본 단축키이며, 사용자 지정한 항목은 설정과 앱 메뉴의 표시를 따릅니다.</p>
+      <div class="shortcuts">
+        <table><caption>탭과 탐색</caption><thead><tr><th scope="col">하고 싶은 일</th><th scope="col">기본 입력</th></tr></thead><tbody>
+          <tr><td>폴더를 새 탭으로 열기</td><td><kbd>휠클릭</kbd> / <kbd>⌘ 더블클릭</kbd></td></tr>
+          <tr><td>선택한 폴더를 새 탭으로 열기</td><td><kbd>⌘ Enter</kbd></td></tr>
+          <tr><td>탭 복제</td><td><kbd>탭 더블클릭</kbd></td></tr>
+          <tr><td>새 탭 / 탭 닫기</td><td><kbd>⌘ T</kbd> / <kbd>⌘ W</kbd></td></tr>
+          <tr><td>닫은 탭 다시 열기</td><td><kbd>⌘ ⇧ T</kbd></td></tr>
+          <tr><td>폴더 열기</td><td><kbd>⌘ O</kbd></td></tr>
+          <tr><td>이전 / 다음 위치</td><td><kbd>⌘ [</kbd> / <kbd>⌘ ]</kbd></td></tr>
+          <tr><td>상위 폴더 / 새로고침</td><td><kbd>⌘ ↑</kbd> / <kbd>⌘ R</kbd></td></tr>
+          <tr><td>검색 / 미리보기</td><td><kbd>⌘ F</kbd> / <kbd>⌘ ⇧ P</kbd></td></tr>
+        </tbody></table>
+        <table><caption>선택과 파일 작업</caption><thead><tr><th scope="col">하고 싶은 일</th><th scope="col">기본 입력</th></tr></thead><tbody>
+          <tr><td>복사 / 잘라내기 / 붙여넣기</td><td><kbd>⌘ C</kbd> / <kbd>⌘ X</kbd> / <kbd>⌘ V</kbd></td></tr>
+          <tr><td>파일 이름 변경</td><td><kbd>⌘ ⇧ R</kbd></td></tr>
+          <tr><td>파일 복제</td><td><kbd>⌘ D</kbd></td></tr>
+          <tr><td>휴지통으로 이동</td><td><kbd>⌘ ⌫</kbd></td></tr>
+          <tr><td>지원되는 파일 작업 실행 취소</td><td><kbd>⌘ Z</kbd></td></tr>
+          <tr><td>파일 경로 복사</td><td><kbd>⌘ ⌥ C</kbd></td></tr>
+          <tr><td>전체 선택</td><td><kbd>⌘ A</kbd></td></tr>
+          <tr><td>숨김 파일 표시 전환</td><td><kbd>⌘ ⇧ .</kbd></td></tr>
+          <tr><td>설정 열기</td><td><kbd>⌘ ,</kbd></td></tr>
+        </tbody></table>
+      </div>
+      <p class="small" style="margin-top:12px">⌘ Command · ⇧ Shift · ⌥ Option · ⌫ Delete · 휠클릭은 마우스 가운데 버튼 클릭입니다. 파일 복제와 탭 복제는 서로 다른 동작입니다.</p>
+      <div class="local">
+        <div><h3>개인용 로컬 버전</h3><p>이 Mac에서 개인용으로 관리하는 버전입니다. 자동 업데이트나 앱 내 피드백 전송 없이 사용하며, 작업 공간과 설정은 로컬에 저장합니다.</p></div>
+        <div><h3>상태 저장 위치</h3><p>프로젝트·탭·즐겨찾기·설정을 다음 파일에 저장합니다.</p><code>~/Library/Application Support/com.konslie.mqdir/state.json</code></div>
+      </div>
+      <div class="scope">
+        <p><strong>미리보기:</strong> Markdown의 외부 이미지는 기본 차단합니다. 기존의 <em>Load external images</em>를 직접 누르면 해당 서버로 요청이 발생합니다. </p>
+        <p><strong>외관·단축키 설정:</strong> <kbd>⌘ ,</kbd>로 설정을 열고 Appearance에서 Match System·Light·Dark를 고릅니다. 변경 가능한 17개 항목은 단축키 동작이며, 테마 종류 수가 아닙니다.</p>
+        <p><strong>화면 안내:</strong> 실제 앱 메뉴와 버튼은 영어로 표시됩니다. 이 자료에서는 자주 쓰는 영문 이름을 함께 적었습니다.</p>
+        <p><strong>출처와 라이선스:</strong> <strong>kq-dir은 원작자 h5nam의 오픈소스 mq-dir 소스를 기반으로 만든 개인·비상업 사용 버전입니다.</strong> 원본 기준 커밋 <code>399999d</code>, 이 자료의 기능 기준 커밋 <code>e7a1891</code>. Copyright © 2026 mq-dir contributors. 원저작권 고지와 MIT 라이선스는 <a href="../LICENSE">LICENSE</a>에 유지합니다.</p>
+      </div>
+      <footer class="footer"><span>2026.11.09 · 외부 폰트·이미지·스크립트 없이 열리는 로컬 자료</span><span>02 / 빠른 참고</span></footer>
+    </section>
+  </main>
+</body>
+</html>
