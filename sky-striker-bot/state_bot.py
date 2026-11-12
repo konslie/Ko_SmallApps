@@ -19,13 +19,15 @@ EXPOSURE = """
       w:o.w || (o.r ? o.r*2 : 28), h:o.h || (o.r ? o.r*2 : 28),
       type:o.type, hp:o.hp, active:o.active, seek:!!o.seek,
       burst:!!o.burst, isBoss:!!o.isBoss, isPlanet:!!o.isPlanet, enterY:o.enterY,
-      score:o.score || 0, speed:o.speed || 0});
+      score:o.score || 0, speed:o.speed || 0,
+      fireIn:o.fireInterval ? Math.max(0,o.fireInterval-o.fireTimer) : null});
     return {state:game.state, stage:game.stage, phase:game.phase, score:game.score,
       width:game.W, height:game.H, cardPick:game.cardPick,
       cards:(game.cardChoices || []).map(c => ({id:c.id, name:c.name, desc:c.desc})),
       clearedStage:game.clearedStage,
       unlockedAircraft:Object.keys(AIRCRAFT).filter(k => game.isUnlocked(k)),
       unlockedWeapons:Object.keys(WEAPON_SYSTEMS).filter(k => game.isWeaponUnlocked(k)),
+      lightningRange:p ? WEAPON_SYSTEMS.chain.levels[p.weaponLevel-1].range : 0,
       stats:game.stats ? {kills:game.stats.kills,hits:game.stats.hits,ults:game.stats.ults} : null,
       player:p ? {x:p.x,y:p.y,w:p.w,h:p.h,speed:p.speed,hp:p.hp,maxHp:p.maxHp,
         shield:p.shield,invincible:p.invincible,star:p.star,slowT:p.slowT,
@@ -46,14 +48,41 @@ def choose_card(cards, player):
     for i, card in enumerate(cards):
         if card["id"] == "score" or re.search(r"점수\s*[×x]\s*1\.5", card["desc"]):
             return i
+    if player['hp'] >= player['maxHp'] / 2:
+        for i, card in enumerate(cards):
+            if card['id'] == 'luck':
+                return i
     def value(card):
         name = card["name"]
-        if "회복" in name and player["hp"] <= player["maxHp"] - 2:
+        if (card['id'] == 'heal' or '회복' in name or '수리' in name) and player["hp"] <= player["maxHp"] - 2:
             return 12
         return sum(weight for word, weight in
                    [("화력", 9), ("자석", 7), ("보호", 6), ("필살기", 5), ("연사", 5)]
                    if word in name)
     return max(range(len(cards)), key=lambda i: value(cards[i]))
+
+
+def lightning_fallback(state, danger, direction):
+    """Choose a temporary weapon when lightning cannot safely engage."""
+    p = state['player']
+    if 'chain' not in state['unlockedWeapons']:
+        return None
+    threats = [b for b in state['bullets']
+               if abs(b['x']-p['x']) < 130 and abs(b['y']-p['y']) < 200]
+    low_hp = p['hp'] < p['maxHp'] / 2
+    if low_hp and 'blade' in state['unlockedWeapons'] and (danger >= 12 or len(threats) >= 3):
+        return 'blade'
+    visible = [e for e in state['enemies']
+               if e['y'] > -e['h']/2 and e['y'] < state['height']]
+    # fireChain measures the distance to the edge of the target.
+    nearest = min((max(0, math.hypot(e['x']-p['x'], e['y']-(p['y']-p['h']/2))
+                       - max(e['w'],e['h'])/2) for e in visible), default=None)
+    lightning_range = state.get('lightningRange', 195)
+    blocked = danger >= 12 or (len(threats) >= 3 and direction[1] >= 0)
+    if (nearest is not None and nearest > lightning_range * 1.05 and blocked
+            and 'homing' in state['unlockedWeapons']):
+        return 'homing'
+    return None
 
 
 def switch_weapon(page, key):
@@ -83,6 +112,8 @@ def choose_move(state):
                           and e.get('enterY') is not None and e['y'] < e['enterY']), None)
     target = min(targets, key=lambda e: abs(e["x"]-x)*.25 - e["y"]*.55
                  - (150 if e["isBoss"] else 0)
+                 - (max(0, 60-e['fireIn']) if p['weapon'] == 'chain'
+                    and e.get('fireIn') is not None and not e.get('isPlanet') else 0)
                  - (min(120, e.get("score", 0)/20) if e.get("isPlanet") else 0), default=None)
     # When approaching a boss from below, prevent ordinary enemies from
     # slipping behind the ship. Only chase those we can get below in time.
@@ -247,6 +278,9 @@ def run(args):
         previous_weapon = None
         boss_previous_weapon = None
         boss_retreat_switched = False
+        fallback_since = None
+        recovery_since = None
+        weapon_changed_at = 0.0
         def change_weapon(key):
             for held_key in held:
                 page.keyboard.up(held_key)
@@ -332,6 +366,33 @@ def run(args):
                 page.wait_for_timeout(50)
                 continue
             (dx,dy),danger = choose_move(s)
+            if 'chain' in s['unlockedWeapons'] and s['phase'] not in ('bonus', 'midwarn', 'bosswarn'):
+                now = time.monotonic()
+                fallback = lightning_fallback(s, danger, (dx,dy))
+                if fallback:
+                    recovery_since = None
+                    if fallback_since is None:
+                        fallback_since = now
+                    if (p['weapon'] != fallback and now-fallback_since >= .5
+                            and now-weapon_changed_at >= 2):
+                        weapon_changed_at = time.monotonic()
+                        if change_weapon(fallback):
+                            print('접근 위험, 임시 무기', fallback, flush=True)
+                            boss_retreat_switched = True
+                        continue
+                else:
+                    fallback_since = None
+                    if danger > 10:
+                        recovery_since = None
+                    elif recovery_since is None:
+                        recovery_since = now
+                    if (p['weapon'] != 'chain' and recovery_since is not None
+                            and now-recovery_since >= 1.5
+                            and now-weapon_changed_at >= 2):
+                        weapon_changed_at = time.monotonic()
+                        if change_weapon('chain'):
+                            print('위험 감소, 라이트닝 복귀', flush=True)
+                        continue
             boss_attacking = any(e['isBoss'] and e.get('enterY') is not None
                                  and e['y'] >= e['enterY'] for e in s['enemies'])
             if (s['phase'] in ('midboss', 'boss') and boss_attacking and dy > 0
