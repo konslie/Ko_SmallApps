@@ -31,6 +31,7 @@ EXPOSURE = """
       stats:game.stats ? {kills:game.stats.kills,hits:game.stats.hits,ults:game.stats.ults} : null,
       player:p ? {x:p.x,y:p.y,w:p.w,h:p.h,speed:p.speed,hp:p.hp,maxHp:p.maxHp,
         shield:p.shield,invincible:p.invincible,star:p.star,slowT:p.slowT,
+        surge:p.surge,sanctuary:p.sanctuary,dash:p.dash,
         aircraft:p.aircraft,weapon:p.weaponSystem,weaponLevel:p.weaponLevel,
         weaponRange:WEAPON_SYSTEMS[p.weaponSystem].levels[p.weaponLevel-1].range || 0,
         abilityCd:p.abilityCd,bombs:p.bombs} : null,
@@ -67,6 +68,8 @@ def lightning_fallback(state, danger, direction):
     p = state['player']
     if 'chain' not in state['unlockedWeapons']:
         return None
+    if invulnerability_frames(p) > 48:
+        return None
     threats = [b for b in state['bullets']
                if abs(b['x']-p['x']) < 130 and abs(b['y']-p['y']) < 200]
     low_hp = p['hp'] < p['maxHp'] / 2
@@ -100,10 +103,19 @@ def switch_weapon(page, key):
     return selected
 
 
+def invulnerability_frames(player):
+    return max(player.get(key, 0) or 0
+               for key in ('invincible', 'star', 'surge', 'sanctuary', 'dash'))
+
+
 def choose_move(state):
     p = state["player"]
     x, y = p["x"], p["y"]
     speed = p["speed"] * (0.55 if p["slowT"] else 1)
+    immunity = invulnerability_frames(p)
+    retreat_y = state['height'] * .78
+    escape_frames = max(0, retreat_y-y) / max(1, speed)
+    expiring = 0 < immunity <= escape_frames + 24
     bullets = [b for b in state["bullets"] if -80 < b["y"] < state["height"]+80
                and abs(b["x"]-x) < 220 and abs(b["y"]-y) < 280]
     enemies = [e for e in state["enemies"] if -50 < e["y"] < state["height"]+50]
@@ -157,8 +169,22 @@ def choose_move(state):
     urgent_planet = bool(target and target.get('isPlanet') and target['y'] > y-200)
     boss_setup = state['phase'] in ('midwarn', 'bosswarn') or entering_boss is not None
     close_attack = boss_setup and p['weapon'] in ('spread', 'chain')
+    dogfight = bool(target and immunity > escape_frames + 48
+                    and state['phase'] in ('wave1', 'wave2', 'midboss', 'boss'))
     pursue_item = intercept is not None and not urgent_planet and not close_attack and rescue is None
-    if rescue:
+    if expiring:
+        # Leave the front before protection ends. Future hazard checks below
+        # still account for beams and bullets after their immunity deadline.
+        target_x, target_y = x, retreat_y
+        pursue_item = False
+    elif dogfight:
+        target_x = target['x']
+        gap = (target['h'] + p['h'])/2 + 12
+        if p['weapon'] == 'chain':
+            gap = max(gap, p['weaponRange']*.55)
+        target_y = min(state['height']-p['h']/2, target['y'] + gap)
+        pursue_item = False
+    elif rescue:
         _, _, target_x, target_y = rescue
     elif close_attack:
         # Spawn locations are centered for one boss and at the thirds for twins.
@@ -189,6 +215,8 @@ def choose_move(state):
             for t in (4,8,12,18,24,30):
                 px = min(state["width"]-p["w"]/2,max(p["w"]/2,x+dx*speed*t))
                 py = min(state["height"]-p["h"]/2,max(p["h"]/2,y+dy*speed*t))
+                if immunity > t + 12:
+                    continue
                 for b in bullets:
                     bx, by = b["x"]+b["vx"]*t, b["y"]+b["vy"]*t
                     gapx = abs(px-bx)-(p["w"]+b["w"])/2
@@ -221,7 +249,7 @@ def choose_move(state):
             goal_x = min(state["width"]-p["w"]/2,max(p["w"]/2,x+dx*speed*travel))
             goal_y = min(state["height"]-p["h"]/2,max(p["h"]/2,y+dy*speed*travel))
             objective = abs(goal_x-target_x)*(0.8 if not pursue_item else 0.9)
-            objective += abs(goal_y-target_y)*(.8 if rescue or close_attack else .65 if pursue_item else .8 if target and p['weapon'] == 'chain' else .15)
+            objective += abs(goal_y-target_y)*(.8 if expiring or dogfight or rescue or close_attack else .65 if pursue_item else .8 if target and p['weapon'] == 'chain' else .15)
             # Urgent collision avoidance dominates, but distant bullets should
             # not continuously pull the ship out of the firing line.
             score = max(0, danger-5)*10 + objective + (2 if dx or dy else 0)
@@ -412,7 +440,7 @@ def run(args):
             for key in held-keys: page.keyboard.up(key)
             for key in keys-held: page.keyboard.down(key)
             held=keys
-            if danger > 23 and not p["invincible"] and not p["star"] and time.monotonic()-last_special > 1:
+            if danger > 23 and invulnerability_frames(p) == 0 and time.monotonic()-last_special > 1:
                 if p["aircraft"] in ("falcon", "phantom", "titan"):
                     # Their abilities are either passive or the same as the
                     # ultimate. Space cannot rescue them from imminent danger.
