@@ -1,9 +1,11 @@
 """Sky Striker controller using a read-only snapshot of the running game."""
 import argparse
 import getpass
+import json
 import math
 import re
 import sys
+import subprocess
 import time
 from pathlib import Path
 
@@ -23,6 +25,7 @@ EXPOSURE = """
       fireIn:o.fireInterval ? Math.max(0,o.fireInterval-o.fireTimer) : null});
     return {state:game.state, stage:game.stage, phase:game.phase, score:game.score,
       width:game.W, height:game.H, cardPick:game.cardPick,
+      difficulty:game.difficulty,victory:document.getElementById('gameover-title').textContent === 'ALL CLEAR!',
       cards:(game.cardChoices || []).map(c => ({id:c.id, name:c.name, desc:c.desc})),
       clearedStage:game.clearedStage,
       unlockedAircraft:Object.keys(AIRCRAFT).filter(k => game.isUnlocked(k)),
@@ -106,6 +109,10 @@ def switch_weapon(page, key):
 def invulnerability_frames(player):
     return max(player.get(key, 0) or 0
                for key in ('invincible', 'star', 'surge', 'sanctuary', 'dash'))
+
+
+def next_difficulty(difficulty, victory):
+    return 'hard' if difficulty == 'normal' and victory else None
 
 
 def choose_move(state):
@@ -296,7 +303,17 @@ def run(args):
             print('로그인 확인:',page.locator('.acc-name').inner_text(),flush=True)
             page.locator('#settings-close').click()
         page.locator('[data-diff="normal"]').click()
-        page.locator("#start-btn").click()
+        if args.resume:
+            try:
+                page.locator('#continue-btn').wait_for(state='visible', timeout=8000)
+            except Exception:
+                print('서버에서 이어하기 기록을 찾지 못했습니다. 새 게임은 시작하지 않습니다.', flush=True)
+                page.screenshot(path=args.capture)
+                browser.close()
+                return
+            page.locator('#continue-btn').click()
+        else:
+            page.locator("#start-btn").click()
         held = set()
         start = time.monotonic()
         last_stage = 0
@@ -309,14 +326,24 @@ def run(args):
         fallback_since = None
         recovery_since = None
         weapon_changed_at = 0.0
+        status_at = 0.0
+        completed = False
         def change_weapon(key):
             for held_key in held:
                 page.keyboard.up(held_key)
             held.clear()
             return switch_weapon(page, key)
-        while time.monotonic()-start < args.seconds:
+        while args.seconds <= 0 or time.monotonic()-start < args.seconds:
             s = page.evaluate("() => window.__pilotSnapshot()")
             p = s["player"]
+            if time.monotonic() - status_at >= 2:
+                status = {key:s.get(key) for key in ('state','stage','phase','score','difficulty','stats')}
+                status['player'] = {key:p.get(key) for key in ('hp','maxHp','shield','aircraft','weapon','weaponLevel')} if p else None
+                status['updatedAt'] = time.time()
+                temp = Path(args.status).with_suffix('.tmp')
+                temp.write_text(json.dumps(status,ensure_ascii=False),encoding='utf-8')
+                temp.replace(args.status)
+                status_at = time.monotonic()
             if s["state"] in ("gameover","credits"):
                 print("최종",s["stage"],"스테이지",s["score"],"점",s["stats"],flush=True)
                 # gameOver submits the score asynchronously. Keep the browser
@@ -325,6 +352,34 @@ def run(args):
                 while not score_response and time.monotonic() < deadline:
                     page.wait_for_timeout(100)
                 print('랭킹 제출',score_response[-1] if score_response else '응답 확인 실패',flush=True)
+                status.update({key:s.get(key) for key in ('state','stage','phase','score','difficulty','stats')})
+                status['updatedAt'] = time.time()
+                status['ranking'] = score_response[-1] if score_response else None
+                temp = Path(args.status).with_suffix('.tmp')
+                temp.write_text(json.dumps(status,ensure_ascii=False),encoding='utf-8')
+                temp.replace(args.status)
+                page.screenshot(path=str(Path(args.capture).with_stem(Path(args.capture).stem+'-'+s['difficulty'])))
+                upcoming = next_difficulty(s['difficulty'],s['victory']) if args.campaign else None
+                if upcoming:
+                    for key in held:
+                        page.keyboard.up(key)
+                    held.clear()
+                    if s['state'] == 'credits':
+                        page.keyboard.press('Escape')
+                    page.locator('#gameover-menu-btn').click()
+                    page.locator('[data-diff="'+upcoming+'"]').click()
+                    score_response.clear()
+                    page.locator('#start-btn').click()
+                    last_stage, last_phase, last_card = 0, None, None
+                    previous_weapon = boss_previous_weapon = None
+                    boss_retreat_switched = False
+                    fallback_since = recovery_since = None
+                    weapon_changed_at = last_special = 0.0
+                    print('보통 ALL CLEAR, 어려움 시작 — 시간 제한 없음',flush=True)
+                    continue
+                if s['state'] == 'credits':
+                    page.keyboard.press('Escape')
+                completed = True
                 break
             if not p:
                 page.wait_for_timeout(50)
@@ -454,15 +509,33 @@ def run(args):
             print("시간 제한",flush=True)
         page.screenshot(path=args.capture)
         print("화면 저장",args.capture,flush=True)
+        if args.sleep_when_done and completed:
+            for key in held:
+                page.keyboard.up(key)
+            print('최종 게임 종료 확인, 맥북 잠자기 전환',flush=True)
+            subprocess.run(['pmset','sleepnow'],check=True)
+            # Keep the final result page open when the Mac wakes again.
+            while not page.is_closed():
+                page.wait_for_timeout(1000)
         browser.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seconds",type=float,default=3600)
+    parser.add_argument("--seconds",type=float,default=0,
+                        help="실행 시간 제한(초), 기본 0은 게임이 끝날 때까지 실행")
     parser.add_argument("--headless",action="store_true")
     parser.add_argument('--browser', choices=('auto', 'chrome', 'chromium'), default='auto',
                         help='auto: macOS에서는 Chrome, 그 외에는 Playwright Chromium 사용')
     parser.add_argument("--login",action="store_true",help="로그인 정보를 안전하게 입력받아 게임 시작")
+    parser.add_argument('--resume', action='store_true', help='서버에서 불러온 이어하기 기록으로 재개')
+    parser.add_argument('--campaign', action='store_true', help='보통을 끝까지 진행하고 올클리어하면 어려움을 끝까지 진행')
+    parser.add_argument('--sleep-when-done', action='store_true', help='최종 게임 종료 후 macOS 잠자기, 결과 화면 유지')
+    parser.add_argument('--status', default='status.json', help='진행 상태 JSON 경로')
     parser.add_argument("--capture",default="state-result.png")
-    run(parser.parse_args())
+    args = parser.parse_args()
+    if args.campaign and (args.seconds > 0 or args.resume):
+        parser.error('campaign은 시간 제한 없이 보통 새 게임부터 시작합니다')
+    if args.sleep_when_done and sys.platform != 'darwin':
+        parser.error('잠자기 옵션은 macOS에서만 사용할 수 있습니다')
+    run(args)
