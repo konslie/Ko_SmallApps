@@ -52,9 +52,21 @@ EXPOSURE = """
 
 
 def choose_card(cards, player):
+    def find(card_id):
+        return next((i for i, card in enumerate(cards) if card['id'] == card_id), None)
+    # PW x2 also stops the weapon level from decaying, which cost whole
+    # bonus stages; while the weapon is below its cap it beats the score card.
+    below_cap = player['weaponLevel'] < (player.get('weaponCap') or 8)
+    if below_cap and find('pw2') is not None:
+        return find('pw2')
     for i, card in enumerate(cards):
         if card["id"] == "score" or re.search(r"점수\s*[×x]\s*1\.5", card["desc"]):
             return i
+    # Seraph's ultimate turns bullets into points and grants invulnerability.
+    if player['aircraft'] == 'seraph' and find('ult') is not None:
+        return find('ult')
+    if find('pw2') is not None:
+        return find('pw2')
     if player['hp'] >= player['maxHp'] / 2:
         for i, card in enumerate(cards):
             if card['id'] == 'luck':
@@ -69,18 +81,15 @@ def choose_card(cards, player):
     return max(range(len(cards)), key=lambda i: value(cards[i]))
 
 
-def lightning_fallback(state, danger):
-    """Choose a temporary weapon when lightning cannot safely engage."""
+def lightning_fallback(state):
+    """Choose a temporary weapon when lightning cannot reach the boss."""
     p = state['player']
     if 'chain' not in state['unlockedWeapons']:
         return None
     if invulnerability_frames(p) > 48:
         return None
-    threats = [b for b in state['bullets']
-               if abs(b['x']-p['x']) < 130 and abs(b['y']-p['y']) < 200]
-    low_hp = p['hp'] < p['maxHp'] / 2
-    if low_hp and 'blade' in state['unlockedWeapons'] and (danger >= 12 or len(threats) >= 3):
-        return 'blade'
+    # No blade fallback at low HP: a point-blank weapon on a damaged ship
+    # cut damage in the late stages (33 switches in one run).
     visible = [e for e in state['enemies']
                if e['y'] > -e['h']/2 and e['y'] < state['height']]
     # fireChain measures the distance to the edge of the target.
@@ -724,7 +733,7 @@ def run(args):
             if ('chain' in s['unlockedWeapons'] and not spread_window
                     and s['phase'] not in ('bonus', 'midwarn', 'bosswarn')):
                 now = time.monotonic()
-                fallback = lightning_fallback(s, danger)
+                fallback = lightning_fallback(s)
                 if fallback:
                     recovery_since = None
                     if fallback_since is None:
