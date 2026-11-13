@@ -163,6 +163,28 @@ def next_chain_step(s, step):
     return None
 
 
+def pinned(s):
+    """The ship is pressed against the bottom with a crowd right above it."""
+    p = s['player']
+    if p['y'] < s['height'] * .85:
+        return False
+    above = lambda o: abs(o['x']-p['x']) < 160 and 0 < p['y']-o['y'] < 260
+    crowd = (sum(1 for b in s['bullets'] if above(b))
+             + sum(1 for e in s['enemies'] if not e['isBoss'] and above(e)))
+    return crowd >= 12
+
+
+def breakout_key(p):
+    """Key of a skill that gets through: nova's surge or raptor's dash
+    (invulnerable, own cooldown) first, else the ultimate (every aircraft's
+    clears bullets, stops them or makes the ship invulnerable)."""
+    if p['aircraft'] in ('nova', 'raptor') and not p['abilityCd']:
+        return 'Space'
+    if p['bombs'] > 0:
+        return 'b'
+    return None
+
+
 def invulnerability_frames(player):
     return max(player.get(key, 0) or 0
                for key in ('invincible', 'star', 'surge', 'sanctuary', 'dash'))
@@ -821,9 +843,12 @@ def run(args):
                         recovery_since = None
                     elif recovery_since is None:
                         recovery_since = now
-                    if (p['weapon'] != 'chain' and recovery_since is not None
-                            and now-recovery_since >= 1.5
-                            and now-weapon_changed_at >= 2):
+                    # Waves: spread and homing are too weak against crowds of
+                    # small enemies, so return to lightning without waiting.
+                    in_wave = s['phase'] in ('wave1', 'wave2')
+                    if (p['weapon'] != 'chain' and now-weapon_changed_at >= 2
+                            and (in_wave or (recovery_since is not None
+                                             and now-recovery_since >= 1.5))):
                         weapon_changed_at = time.monotonic()
                         if change_weapon('chain'):
                             print('사거리 안, 라이트닝 복귀', flush=True)
@@ -834,7 +859,15 @@ def run(args):
             for key in held-keys: page.keyboard.up(key)
             for key in keys-held: page.keyboard.down(key)
             held=keys
-            if danger > 23 and invulnerability_frames(p) == 0 and time.monotonic()-last_special > 1:
+            breakout = breakout_key(p) if pinned(s) else None
+            if (breakout and invulnerability_frames(p) == 0
+                    and time.monotonic()-last_special > 3):
+                # Pushed to the bottom under a crowd: dodging no longer works, so
+                # spend a skill to break through instead of waiting to be hit.
+                page.keyboard.press(breakout)
+                print('밀림 돌파', breakout, p['aircraft'], flush=True)
+                last_special = time.monotonic()
+            elif danger > 23 and invulnerability_frames(p) == 0 and time.monotonic()-last_special > 1:
                 if p["aircraft"] in ("falcon", "phantom", "titan"):
                     # Their abilities are either passive or the same as the
                     # ultimate. Space cannot rescue them from imminent danger.
