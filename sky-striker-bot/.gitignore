@@ -1,0 +1,7 @@
+.env
+__pycache__/
+status.json
+status.tmp
+telemetry*.json
+telemetry*.tmp
+state-result*.png
