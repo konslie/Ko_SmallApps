@@ -173,15 +173,29 @@ def pinned(s):
     return crowd >= 12
 
 
-def breakout_key(p):
-    """Key of a skill that gets through: nova's surge or raptor's dash
-    (invulnerable, own cooldown) first, else the ultimate (every aircraft's
-    clears bullets, stops them or makes the ship invulnerable)."""
-    if p['aircraft'] in ('nova', 'raptor') and not p['abilityCd']:
-        return 'Space'
+def breakout_plan(s):
+    """How to get through as (aircraft to swap to or None, key), or None.
+
+    Skills first: nova's surge or raptor's dash when held and ready, else a
+    swap to nova for its surge (the ability cooldown is shared); then the
+    ultimate (every aircraft's clears bullets, stops them or makes the ship
+    invulnerable).
+    """
+    p = s['player']
+    if not p['abilityCd']:
+        if p['aircraft'] in ('nova', 'raptor'):
+            return (None, 'Space')
+        if 'nova' in s['unlockedAircraft']:
+            return ('nova', 'Space')
     if p['bombs'] > 0:
-        return 'b'
+        return (None, 'b')
     return None
+
+
+def last_stand(p, danger):
+    """One hit from game over with nothing left to absorb it."""
+    return (p['hp'] <= 1 and not p['shield'] and invulnerability_frames(p) == 0
+            and danger > 15)
 
 
 def invulnerability_frames(player):
@@ -634,6 +648,7 @@ def run(args):
         tele = None   # one telemetry file per difficulty
         chain_step = chain_home = None   # skill chain in progress, aircraft to return to
         chain_retry_at = 0.0             # after a refused swap, wait before retrying
+        blade_from = None                # weapon to restore after the last-stand blade
         def change_weapon(key):
             for held_key in held:
                 page.keyboard.up(held_key)
@@ -789,20 +804,37 @@ def run(args):
                     continue
             # Spread is kept while a boss descends, and while protected in a boss
             # fight, since point-blank spread is the strongest burst.
+            # Blade only as the last stand: its blades erase bullets around the
+            # ship but barely hit anything. Skills (below) are tried first.
+            emergency = last_stand(p, danger)
+            if (emergency and blade_from is None and breakout_plan(s) is None
+                    and 'blade' in s['unlockedWeapons'] and p['weapon'] != 'blade'):
+                blade_from = p['weapon']
+                weapon_changed_at = time.monotonic()
+                if change_weapon('blade'):
+                    print('마지막 방패, 블레이드', flush=True)
+                continue
+            if blade_from is not None and (p['hp'] > 1 or p['shield']
+                                           or invulnerability_frames(p) or danger < 5):
+                restore, blade_from = blade_from, None
+                weapon_changed_at = time.monotonic()
+                if p['weapon'] == 'blade' and change_weapon(restore):
+                    print('위기 넘김, 무기 복구', restore, flush=True)
+                continue
             spread_window = in_boss_fight and p['weapon'] == 'spread' and (
                 bool(entering_bosses(s)) or protection_budget(p) > 60)
             now = time.monotonic()
             # Only item and skill invulnerability (star, surge, sanctuary): the
             # frames after a hit (titan's 180) would pull a damaged ship to the boss.
             granted = max(p.get(key) or 0 for key in ('star', 'surge', 'sanctuary'))
-            if (in_boss_fight and boss_attacking and granted > 150
+            if (blade_from is None and in_boss_fight and boss_attacking and granted > 150
                     and 'spread' in s['unlockedWeapons'] and p['weapon'] != 'spread'
                     and now-weapon_changed_at >= 2):
                 weapon_changed_at = now
                 if change_weapon('spread'):
                     print('무적 중 보스 근접, 산탄', flush=True)
                 continue
-            if (in_boss_fight and boss_attacking and p['weapon'] == 'spread'
+            if (blade_from is None and in_boss_fight and boss_attacking and p['weapon'] == 'spread'
                     and not spread_window and boss_previous_weapon
                     and boss_previous_weapon != 'spread' and now-weapon_changed_at >= .3):
                 # The boss now fires. Pausing clears the game's held keys; the
@@ -813,7 +845,7 @@ def run(args):
                 else:
                     print('보스 도착, 주무기 복구 실패', boss_previous_weapon, flush=True)
                 continue
-            if ('chain' in s['unlockedWeapons'] and not spread_window
+            if ('chain' in s['unlockedWeapons'] and not spread_window and blade_from is None
                     and s['phase'] not in ('bonus', 'midwarn', 'bosswarn')):
                 now = time.monotonic()
                 fallback = lightning_fallback(s)
@@ -849,13 +881,18 @@ def run(args):
             for key in held-keys: page.keyboard.up(key)
             for key in keys-held: page.keyboard.down(key)
             held=keys
-            breakout = breakout_key(p) if pinned(s) else None
+            breakout = breakout_plan(s) if pinned(s) or emergency else None
             if (breakout and invulnerability_frames(p) == 0
                     and time.monotonic()-last_special > 3):
-                # Pushed to the bottom under a crowd: dodging no longer works, so
+                # Pushed to the bottom under a crowd, or one hit from game over:
                 # spend a skill to break through instead of waiting to be hit.
-                page.keyboard.press(breakout)
-                print('밀림 돌파', breakout, p['aircraft'], flush=True)
+                swap, key = breakout
+                if not swap or change_aircraft(swap):
+                    if swap and chain_step is None:
+                        # The surge outlives the swap; the chain logic swaps back.
+                        chain_home, chain_step = p['aircraft'], 'surge'
+                    page.keyboard.press(key)
+                    print('밀림 돌파' if not emergency else '위기 돌파', key, swap or p['aircraft'], flush=True)
                 last_special = time.monotonic()
             elif danger > 23 and invulnerability_frames(p) == 0 and time.monotonic()-last_special > 1:
                 if p["aircraft"] in ("falcon", "phantom", "titan"):
