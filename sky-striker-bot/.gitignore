@@ -5,3 +5,4 @@ status.tmp
 telemetry*.json
 telemetry*.tmp
 state-result*.png
+.browser-profile/

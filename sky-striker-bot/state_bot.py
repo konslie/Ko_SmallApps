@@ -6,7 +6,6 @@ import math
 import os
 import re
 import sys
-import subprocess
 import time
 from pathlib import Path
 
@@ -27,7 +26,7 @@ EXPOSURE = """
     return {state:game.state, stage:game.stage, phase:game.phase, score:game.score,
       width:game.W, height:game.H, cardPick:game.cardPick,
       multiplier:game.multiplier, multiplierTimer:game.multiplierTimer,
-      difficulty:game.difficulty,victory:document.getElementById('gameover-title').textContent === 'ALL CLEAR!',
+      difficulty:game.difficulty, hardUnlocked:!!game.hardUnlocked, hellUnlocked:!!game.hellUnlocked,victory:document.getElementById('gameover-title').textContent === 'ALL CLEAR!',
       cards:(game.cardChoices || []).map(c => ({id:c.id, name:c.name, desc:c.desc})),
       clearedStage:game.clearedStage,
       unlockedAircraft:Object.keys(AIRCRAFT).filter(k => game.isUnlocked(k)),
@@ -197,12 +196,6 @@ SHIELD_FRAMES = 60
 def protection_budget(player):
     """Frames the ship can press forward, counting each shield as one hit."""
     return invulnerability_frames(player) + SHIELD_FRAMES * (player.get('shield') or 0)
-
-
-def next_difficulty(difficulty, victory):
-    if not victory:
-        return None
-    return {'normal': 'hard', 'hard': 'hell'}.get(difficulty)
 
 
 class Telemetry:
@@ -534,8 +527,16 @@ def run(args):
         launch_options = {'headless': args.headless}
         if args.browser == 'chrome' or (args.browser == 'auto' and sys.platform == 'darwin'):
             launch_options['channel'] = 'chrome'
-        browser = pw.chromium.launch(**launch_options)
-        page = browser.new_page(viewport={"width":800,"height":900})
+        viewport = {"width":800,"height":900}
+        if args.fresh_profile:
+            browser = pw.chromium.launch(**launch_options)
+            page = browser.new_page(viewport=viewport)
+        else:
+            # Difficulty unlocks live only in the browser's storage (the server
+            # save does not restore them), so keep one profile across runs.
+            browser = pw.chromium.launch_persistent_context(
+                str(Path(__file__).with_name('.browser-profile')), viewport=viewport, **launch_options)
+            page = browser.pages[0] if browser.pages else browser.new_page()
         def instrument(route):
             response = route.fetch()
             html = response.text()
@@ -596,7 +597,17 @@ def run(args):
             print('로그인 확인:', page.locator('.acc-name').inner_text(), flush=True)
             if page.locator('#settings-close').is_visible():
                 page.locator('#settings-close').click()
-        page.locator('[data-diff="normal"]').click()
+        page.wait_for_function("() => window.__pilotSnapshot", timeout=15000)
+        unlocks = page.evaluate("() => window.__pilotSnapshot()")
+        hardest = ('hell' if unlocks['hellUnlocked'] else
+                   'hard' if unlocks['hardUnlocked'] else 'normal')
+        # Clicking the difficulty already selected opens its spec modal, which
+        # would cover the start button.
+        if unlocks['difficulty'] != hardest:
+            page.locator('[data-diff="' + hardest + '"]').click()
+        if page.locator('#spec-modal').is_visible():
+            page.locator('#spec-close').click()
+        print('난이도', hardest, flush=True)
         if args.resume:
             try:
                 page.locator('#continue-btn').wait_for(state='visible', timeout=8000)
@@ -620,7 +631,6 @@ def run(args):
         recovery_since = None
         weapon_changed_at = 0.0
         status_at = 0.0
-        completed = False
         tele = None   # one telemetry file per difficulty
         chain_step = chain_home = None   # skill chain in progress, aircraft to return to
         chain_retry_at = 0.0             # after a refused swap, wait before retrying
@@ -653,12 +663,18 @@ def run(args):
                     tele.save()
                     print('기록 저장', tele.path, flush=True)
                     tele = None
-                # gameOver submits the score asynchronously. Keep the browser
-                # alive until the server response arrives or the request times out.
-                deadline = time.monotonic() + 10
-                while not score_response and time.monotonic() < deadline:
-                    page.wait_for_timeout(100)
-                print('랭킹 제출',score_response[-1] if score_response else '응답 확인 실패',flush=True)
+                # gameOver submits the score asynchronously, and only for a
+                # logged-in account. Keep the browser open until the server
+                # answers, then a little longer for the ranking refresh.
+                logged_in = page.evaluate("() => !!localStorage.getItem('skyStrikerAccount')")
+                if logged_in:
+                    deadline = time.monotonic() + 30
+                    while not score_response and time.monotonic() < deadline:
+                        page.wait_for_timeout(200)
+                    page.wait_for_timeout(3000)
+                    print('랭킹 제출',score_response[-1] if score_response else '응답 확인 실패 (30초)',flush=True)
+                else:
+                    print('로그인하지 않아 랭킹에 제출되지 않았습니다', flush=True)
                 status.update({key:s.get(key) for key in ('state','stage','phase','score','difficulty','stats')})
                 status['updatedAt'] = time.time()
                 status['ranking'] = score_response[-1] if score_response else None
@@ -666,34 +682,8 @@ def run(args):
                 temp.write_text(json.dumps(status,ensure_ascii=False),encoding='utf-8')
                 temp.replace(args.status)
                 page.screenshot(path=str(Path(args.capture).with_stem(Path(args.capture).stem+'-'+s['difficulty'])))
-                upcoming = next_difficulty(s['difficulty'],s['victory']) if args.campaign else None
-                if upcoming:
-                    for key in held:
-                        page.keyboard.up(key)
-                    held.clear()
-                    if s['state'] == 'credits':
-                        page.keyboard.press('Escape')
-                    page.locator('#gameover-menu-btn').click()
-                    page.locator('[data-diff="'+upcoming+'"]').click()
-                    score_response.clear()
-                    page.locator('#start-btn').click()
-                    page.wait_for_timeout(500)
-                    started = page.evaluate("() => window.__pilotSnapshot().difficulty")
-                    if started != upcoming:
-                        # A locked difficulty falls back to normal; do not replay it.
-                        print(upcoming, '난이도를 시작하지 못했습니다(잠김). 종료합니다.', flush=True)
-                        completed = True
-                        break
-                    last_stage, last_phase, last_card = 0, None, None
-                    previous_weapon = boss_previous_weapon = None
-                    fallback_since = recovery_since = None
-                    weapon_changed_at = last_special = 0.0
-                    chain_step = chain_home = None
-                    print(s['difficulty'], 'ALL CLEAR,', upcoming, '시작 — 시간 제한 없음', flush=True)
-                    continue
                 if s['state'] == 'credits':
                     page.keyboard.press('Escape')
-                completed = True
                 break
             if not p:
                 page.wait_for_timeout(50)
@@ -892,14 +882,6 @@ def run(args):
             print("시간 제한",flush=True)
         page.screenshot(path=args.capture)
         print("화면 저장",args.capture,flush=True)
-        if args.sleep_when_done and completed:
-            for key in held:
-                page.keyboard.up(key)
-            print('최종 게임 종료 확인, 맥북 잠자기 전환',flush=True)
-            subprocess.run(['pmset','sleepnow'],check=True)
-            # Keep the final result page open when the Mac wakes again.
-            while not page.is_closed():
-                page.wait_for_timeout(1000)
         browser.close()
 
 
@@ -914,8 +896,8 @@ if __name__ == "__main__":
     parser.add_argument('--manual-login', action='store_true',
                         help='열린 브라우저 창에서 사람이 직접 로그인할 때까지 기다린 뒤 게임 시작')
     parser.add_argument('--resume', action='store_true', help='서버에서 불러온 이어하기 기록으로 재개')
-    parser.add_argument('--campaign', action='store_true', help='보통부터 올클리어할 때마다 어려움, 지옥 순으로 이어서 진행')
-    parser.add_argument('--sleep-when-done', action='store_true', help='최종 게임 종료 후 macOS 잠자기, 결과 화면 유지')
+    parser.add_argument('--fresh-profile', action='store_true',
+                        help='저장된 브라우저 프로필(.browser-profile) 대신 매번 새 프로필 사용 (난이도 해금·로그인 유지 안 됨)')
     parser.add_argument('--status', default='status.json', help='진행 상태 JSON 경로')
     parser.add_argument('--telemetry', default='telemetry.json',
                         help='측정 기록 JSON 경로 (난이도별로 -normal 등이 붙음)')
@@ -923,8 +905,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.manual_login and (args.login or args.headless):
         parser.error('manual-login은 창을 띄워 직접 로그인하는 방식이라 --login, --headless와 함께 쓸 수 없습니다')
-    if args.campaign and (args.seconds > 0 or args.resume):
-        parser.error('campaign은 시간 제한 없이 보통 새 게임부터 시작합니다')
-    if args.sleep_when_done and sys.platform != 'darwin':
-        parser.error('잠자기 옵션은 macOS에서만 사용할 수 있습니다')
     run(args)
