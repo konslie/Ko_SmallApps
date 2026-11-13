@@ -5,7 +5,6 @@ import json
 import math
 import os
 import re
-import sys
 import time
 from pathlib import Path
 
@@ -229,6 +228,8 @@ class Telemetry:
         self.fight = None
         self.boss_hp = None
         self.bonus = None
+        self.block = None   # counters at the start of the current 5-stage block
+        self.report_path = self.path.with_name(self.path.stem.replace('telemetry', 'stage-report') + '.md')
 
     def update(self, s, now):
         p = s['player']
@@ -237,11 +238,21 @@ class Telemetry:
         if s['state'] != 'playing' or s['cardPick']:
             return   # The game clock stops here.
         x8 = (s.get('multiplier') or 1) >= 8
+        # The bonus ends in the same frame the next stage starts: record it
+        # first so it counts toward the block being reported.
+        self._boss(s, p, now, dt)
+        self._bonus(s, dt, x8)
         if s['stage'] != self.stage:
             if self.stage is not None and self.stage_time:
                 share = round(self.x8_time / self.stage_time, 3)
                 self.data['stages'].append({'stage': self.stage, 'x8Share': share})
                 print('기록 스테이지', self.stage, 'x8 유지', f'{share:.0%}', flush=True)
+            if self.stage is not None and self.stage % 5 == 0:
+                self.report(s, self.stage)
+            if self.block is None or (self.stage is not None and self.stage % 5 == 0):
+                self.block = {'stage': s['stage'], 'score': s['score'], **s['stats'],
+                              'fights': len(self.data['bossFights']), 'bonus': len(self.data['bonus']),
+                              'drops': len(self.data['levelDrops']), 'stages': len(self.data['stages'])}
             self.stage, self.stage_time, self.x8_time = s['stage'], 0.0, 0.0
         self.stage_time += dt
         self.x8_time += dt if x8 else 0.0
@@ -250,8 +261,6 @@ class Telemetry:
                                             'from': self.level, 'to': p['weaponLevel']})
             print('기록 무기 레벨 하락', self.level, '→', p['weaponLevel'], s['phase'], flush=True)
         self.level = p['weaponLevel']
-        self._boss(s, p, now, dt)
-        self._bonus(s, dt, x8)
 
     def _boss(self, s, p, now, dt):
         phase = s['phase']
@@ -299,6 +308,27 @@ class Telemetry:
             print('기록 보너스', result['stage'], '점수', result['score'], '격추', result['kills'],
                   'x8 유지', f"{result['x8Share']:.0%}", flush=True)
             self.bonus = None
+
+    def report(self, s, last_stage):
+        """One-line summary of the stages since the last report, printed with
+        a fixed prefix (for whoever watches the log to relay) and appended to
+        stage-report-<difficulty>.md."""
+        b, p, st = self.block, s['player'], s['stats']
+        if b is None:
+            return
+        fights = self.data['bossFights'][b['fights']:]
+        bonus = sum(x['score'] for x in self.data['bonus'][b['bonus']:])
+        shares = [x['x8Share'] for x in self.data['stages'][b['stages']:]]
+        line = (f"[5스테이지 보고] {s['difficulty']} {b['stage']}~{last_stage} | "
+                f"점수 {s['score']:,} (+{s['score'] - b['score']:,}) | "
+                f"격추 +{st['kills'] - b['kills']} 피격 +{st['hits'] - b['hits']} 필살기 +{st['ults'] - b['ults']} | "
+                f"HP {p['hp']}/{p['maxHp']} 실드 {p['shield']} | {p['aircraft']} {p['weapon']} Lv{p['weaponLevel']} | "
+                f"x8 {sum(shares) / len(shares) if shares else 0:.0%} | 보너스 {bonus:,} | "
+                f"보스 등장중처치 {sum(f['killedBeforeArrival'] for f in fights)}/{len(fights)} | "
+                f"무기레벨하락 {len(self.data['levelDrops']) - b['drops']}")
+        print(line, flush=True)
+        with self.report_path.open('a', encoding='utf-8') as f:
+            f.write('- ' + line + '\n')
 
     def save(self):
         out = dict(self.data)
@@ -538,19 +568,30 @@ def load_credentials():
 
 def run(args):
     with sync_playwright() as pw:
-        launch_options = {'headless': args.headless}
-        if args.browser == 'chrome' or (args.browser == 'auto' and sys.platform == 'darwin'):
-            launch_options['channel'] = 'chrome'
         viewport = {"width":800,"height":900}
-        if args.fresh_profile:
-            browser = pw.chromium.launch(**launch_options)
-            page = browser.new_page(viewport=viewport)
-        else:
+        def launch(channel):
+            options = {'headless': args.headless}
+            if channel:
+                options['channel'] = channel
+            if args.fresh_profile:
+                browser = pw.chromium.launch(**options)
+                return browser, browser.new_page(viewport=viewport)
             # Difficulty unlocks live only in the browser's storage (the server
             # save does not restore them), so keep one profile across runs.
             browser = pw.chromium.launch_persistent_context(
-                str(Path(__file__).with_name('.browser-profile')), viewport=viewport, **launch_options)
-            page = browser.pages[0] if browser.pages else browser.new_page()
+                str(Path(__file__).with_name('.browser-profile')), viewport=viewport, **options)
+            return browser, browser.pages[0] if browser.pages else browser.new_page()
+        if args.browser == 'chromium':
+            browser, page = launch(None)
+        else:
+            # Installed Chrome whenever it exists, so a person can watch the play.
+            try:
+                browser, page = launch('chrome')
+            except Exception as error:
+                if args.browser == 'chrome':
+                    raise
+                print('Chrome을 열 수 없어 Playwright Chromium을 씁니다:', str(error).splitlines()[0], flush=True)
+                browser, page = launch(None)
         def instrument(route):
             response = route.fetch()
             html = response.text()
@@ -675,6 +716,8 @@ def run(args):
             if s["state"] in ("gameover","credits"):
                 print("최종",s["stage"],"스테이지",s["score"],"점",s["stats"],flush=True)
                 if tele:
+                    if p:
+                        tele.report(s, s['stage'])   # the unfinished block up to game over
                     tele.save()
                     print('기록 저장', tele.path, flush=True)
                     tele = None
@@ -928,7 +971,7 @@ if __name__ == "__main__":
                         help="실행 시간 제한(초), 기본 0은 게임이 끝날 때까지 실행")
     parser.add_argument("--headless",action="store_true")
     parser.add_argument('--browser', choices=('auto', 'chrome', 'chromium'), default='auto',
-                        help='auto: macOS에서는 Chrome, 그 외에는 Playwright Chromium 사용')
+                        help='auto: 설치된 Chrome이 있으면 Chrome, 없으면 Playwright Chromium')
     parser.add_argument("--login",action="store_true",help="로그인 정보를 안전하게 입력받아 게임 시작")
     parser.add_argument('--manual-login', action='store_true',
                         help='열린 브라우저 창에서 사람이 직접 로그인할 때까지 기다린 뒤 게임 시작')
