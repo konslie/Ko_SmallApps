@@ -108,10 +108,18 @@ def lightning_fallback(state):
 
 
 def switch_weapon(page, key):
+    return switch_chip(page, 'weapon', key)
+
+
+def switch_aircraft(page, key):
+    return switch_chip(page, 'aircraft', key)
+
+
+def switch_chip(page, kind, key):
     page.keyboard.press('Escape')
     panel = page.locator('#pause-screen')
     panel.wait_for(state='visible', timeout=3000)
-    button = page.locator('#pause-weapon [data-weapon="' + key + '"]:not([data-why])')
+    button = page.locator('#pause-' + kind + ' [data-' + kind + '="' + key + '"]:not([data-why])')
     if not button.count():
         page.locator('#resume-btn').click()
         return False
@@ -120,6 +128,39 @@ def switch_weapon(page, key):
     selected = 'active' in (button.get_attribute('class') or '').split()
     page.locator('#resume-btn').click()
     return selected
+
+
+# Skill chain: effect timers belong to the player, not the aircraft, so they
+# survive a swap. Nova's surge (6 s, damage x1.5, fire x2) is followed by
+# seraph's sanctuary (5 s) and origin's big bang (3 s), all invulnerable.
+# Ultimate charges and the ability cooldown are shared by every aircraft.
+CHAIN = [('surge', 'nova', 'Space'), ('sanctuary', 'seraph', 'b'), ('bigbang', 'origin', 'b')]
+
+
+def next_chain_step(s, step):
+    """Next skill-chain move as (step, aircraft, key), or None to wait.
+
+    step is the step in progress (None when idle); ('end', None, None) means
+    return to the aircraft held before the chain.
+    """
+    p = s['player']
+    unlocked = s['unlockedAircraft']
+    in_fight = s['phase'] in ('midboss', 'boss')
+    arrived = any(e['isBoss'] for e in s['enemies']) and not entering_bosses(s)
+    if step is None:
+        if (in_fight and arrived and 'nova' in unlocked and 'seraph' in unlocked
+                and not p['abilityCd'] and p['bombs'] >= 1 and invulnerability_frames(p) < 30):
+            return CHAIN[0]
+        return None
+    if not in_fight:
+        return ('end', None, None)
+    if step == 'surge' and (p.get('surge') or 0) <= 30:
+        return CHAIN[1] if p['bombs'] >= 1 else ('end', None, None)
+    if step == 'sanctuary' and (p.get('sanctuary') or 0) <= 20:
+        return CHAIN[2] if 'origin' in unlocked and p['bombs'] >= 1 else ('end', None, None)
+    if step == 'bigbang' and invulnerability_frames(p) == 0:
+        return ('end', None, None)
+    return None
 
 
 def invulnerability_frames(player):
@@ -559,11 +600,18 @@ def run(args):
         status_at = 0.0
         completed = False
         tele = None   # one telemetry file per difficulty
+        chain_step = chain_home = None   # skill chain in progress, aircraft to return to
+        chain_retry_at = 0.0             # after a refused swap, wait before retrying
         def change_weapon(key):
             for held_key in held:
                 page.keyboard.up(held_key)
             held.clear()
             return switch_weapon(page, key)
+        def change_aircraft(key):
+            for held_key in held:
+                page.keyboard.up(held_key)
+            held.clear()
+            return switch_aircraft(page, key)
         while args.seconds <= 0 or time.monotonic()-start < args.seconds:
             s = page.evaluate("() => window.__pilotSnapshot()")
             p = s["player"]
@@ -618,6 +666,7 @@ def run(args):
                     previous_weapon = boss_previous_weapon = None
                     fallback_since = recovery_since = None
                     weapon_changed_at = last_special = 0.0
+                    chain_step = chain_home = None
                     print(s['difficulty'], 'ALL CLEAR,', upcoming, '시작 — 시간 제한 없음', flush=True)
                     continue
                 if s['state'] == 'credits':
@@ -704,6 +753,28 @@ def run(args):
             boss_attacking = any(e['isBoss'] and e.get('enterY') is not None
                                  and e['y'] >= e['enterY'] for e in s['enemies'])
             in_boss_fight = s['phase'] in ('midboss', 'boss')
+            move = (next_chain_step(s, chain_step)
+                    if chain_step or time.monotonic() >= chain_retry_at else None)
+            if move:
+                step, aircraft, key = move
+                if step != 'end':
+                    if chain_step is None:
+                        chain_home = p['aircraft']
+                    if p['aircraft'] == aircraft or change_aircraft(aircraft):
+                        page.keyboard.press(key)
+                        print('스킬 연계', step, aircraft, flush=True)
+                        chain_step = step
+                        continue
+                    print('스킬 연계 교체 실패', aircraft, flush=True)
+                    chain_retry_at = time.monotonic() + 10
+                # Chain over (or a swap refused, e.g. HP too low for that aircraft).
+                if chain_home and p['aircraft'] != chain_home:
+                    change_aircraft(chain_home)
+                if chain_step is not None:
+                    print('스킬 연계 종료', chain_home, flush=True)
+                chain_step = chain_home = None
+                if step == 'end':
+                    continue
             # Spread is kept while a boss descends, and while protected in a boss
             # fight, since point-blank spread is the strongest burst.
             spread_window = in_boss_fight and p['weapon'] == 'spread' and (
