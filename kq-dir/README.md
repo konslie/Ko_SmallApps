@@ -17,6 +17,12 @@ A personal macOS file manager for working with multiple folders in one window. E
 
 See the [Korean feature guide](docs/personal-guide.html) for a visual overview and shortcuts.
 
+## Move selected files and folders to Trash
+
+Select one or more files or folders in list or tree view, then press **`⌘` + `Backspace` (`⌘⌫`)**. The selection in the active pane moves to the macOS Trash. On a Mac keyboard, use the backward-delete key labeled `delete` or `⌫`.
+
+The same action is available through **Edit → Move to Trash**. While editing a filename or search text, the shortcut applies to the text being edited. If you have customized shortcuts, check **`⌘,` → Shortcuts → Move to Trash** for the current binding.
+
 ## Requirements
 
 - macOS 14 or later
