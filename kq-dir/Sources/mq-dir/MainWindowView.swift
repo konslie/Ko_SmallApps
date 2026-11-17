@@ -83,6 +83,10 @@ struct MainWindowView: View {
 
     var body: some View {
         windowChrome
+            .background(TrashShortcutHandler(
+                binding: workspace.workspace.settings.binding(for: .moveToTrash),
+                moveToTrash: { focusedPane.moveSelectionToTrash() }
+            ))
             .alert("Workspace recovery", isPresented: Binding(
                 get: { workspace.recoveryMessage != nil },
                 set: { if !$0 { workspace.recoveryMessage = nil } }
@@ -905,9 +909,11 @@ private struct GlobalNotifications: ViewModifier {
     }
 }
 
+#if !SWIFT_PACKAGE
 #Preview {
     MainWindowView(
         workspace: WorkspaceManager()
     )
         .frame(width: 1100, height: 700)
 }
+#endif

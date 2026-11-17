@@ -19,15 +19,31 @@ macOS에서 여러 폴더를 한 창에 나란히 놓고 사용하는 개인용 
 
 ## 선택한 파일·폴더를 휴지통으로 이동
 
+`0.3.2`에서는 `⌘+Backspace` 입력을 앱 창에서 직접 처리해 메뉴 단축키 전달에만 의존하지 않도록 보완했습니다. [업데이트 DMG](https://github.com/konslie/Ko_SmallApps/releases/tag/kq-dir-v0.3.2)로 설치할 수 있습니다. 이름·검색 텍스트 편집과 사용자 지정 단축키는 유지합니다.
+
 리스트 또는 트리에서 파일·폴더를 하나 이상 선택한 뒤 **`⌘` + `Backspace` (`⌘⌫`)**를 누릅니다. 현재 활성 패널의 선택 항목들이 macOS 휴지통으로 이동합니다. Mac 키보드에서 `delete` 또는 `⌫`로 표시된 뒤로 지우기 키를 사용하세요.
 
 같은 작업은 메뉴의 **Edit → Move to Trash**에서도 실행할 수 있습니다. 이름 변경이나 검색창에서 텍스트를 편집하는 중에는 파일 대신 편집 중인 텍스트에 적용됩니다. 단축키를 변경했다면 **`⌘,` → Shortcuts → Move to Trash**에서 현재 설정을 확인하세요.
 
 ## 요구사항
 
-- macOS 14 이상
-- Xcode 및 Xcode Command Line Tools
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- 실행: macOS 14 이상. 완성된 앱을 사용하는 Mac에는 Xcode가 필요 없습니다.
+- 소스 빌드: Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen), 또는 호환되는 Swift 5.10 이상 Command Line Tools.
+
+## 설치: DMG 또는 CLT
+
+[kq-dir v0.3.2 릴리스](https://github.com/konslie/Ko_SmallApps/releases/tag/kq-dir-v0.3.2)에서 두 방법을 제공합니다.
+
+- **DMG 설치:** `kq-dir-v0.3.2.dmg`를 열고 앱을 `Applications`로 드래그합니다. Apple silicon과 Intel을 모두 지원합니다.
+- **CLT로 직접 빌드:** `kq-dir-v0.3.2-clt-source.zip`을 풀고 아래 명령을 실행합니다. GitHub 소스를 클론한 뒤 `kq-dir/`에서도 같은 명령을 사용할 수 있습니다.
+
+```bash
+cd kq-dir
+bash Scripts/build-clt.sh --version 0.3.2 --build-number 10
+open /tmp/kq-dir-build/clt/kq-dir.app
+```
+
+두 방법 모두 ad-hoc 서명이며 Apple 공증은 하지 않습니다. 회사의 실행 제한을 해제하는 방법은 아닙니다. CLT 설치, 호환 SDK, 최초 실행과 검증 범위는 [설치 안내](docs/install.md)를 참고하세요.
 
 ## 로컬 Debug 빌드
 
@@ -49,7 +65,7 @@ swift test
 xcodebuild -scheme mq-dir -configuration Debug -derivedDataPath DerivedData test -only-testing:mq-dir-service-tests
 ```
 
-`swift test`는 코어 라이브러리를, `mq-dir-service-tests`는 앱 서비스 코드를 검증합니다.
+`swift test`는 코어 라이브러리를, `mq-dir-service-tests`는 앱 서비스 코드를 검증합니다. 이 테스트들은 XCTest가 포함된 Xcode 환경에서 실행합니다. CLT 설치에는 XCTest가 없을 수 있지만 앱 빌드에는 필요하지 않습니다.
 
 ## 저장과 외부 연결
 

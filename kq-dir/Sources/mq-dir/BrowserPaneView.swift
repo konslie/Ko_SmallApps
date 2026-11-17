@@ -1052,6 +1052,7 @@ struct BrowserPaneView: View {
         }
         .simultaneousGesture(TapGesture().onEnded {
             if !isFocused { onFocus() }
+            listFocused = true
             let mods = NSEvent.modifierFlags
             if mods.contains(.shift) {
                 viewModel.extendSelection(to: entry.id)
@@ -1099,6 +1100,7 @@ struct BrowserPaneView: View {
             normalizeHangul: normalizeHangulOnDragOut,
             onClick: { event in
                 if !isFocused { onFocus() }
+                listFocused = true
                 let mods = event.modifierFlags
                 if mods.contains(.shift) {
                     viewModel.extendSelection(to: entry.id)

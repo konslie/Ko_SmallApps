@@ -247,6 +247,7 @@ struct TreeFileListView: View {
         }
         .simultaneousGesture(TapGesture().onEnded {
             if !isFocused { onFocus() }
+            treeFocused = true
             let mods = NSEvent.modifierFlags
             // ⌘+single-click on a folder used to short-circuit to
             // "open in new tab" here. That collided with the new
@@ -277,6 +278,7 @@ struct TreeFileListView: View {
             normalizeHangul: normalizeHangulOnDragOut,
             onClick: { _ in
                 if !isFocused { onFocus() }
+                treeFocused = true
                 viewModel.replaceSelection(entry.id)
             },
             onDoubleClick: { _ in

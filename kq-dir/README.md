@@ -19,15 +19,31 @@ See the [Korean feature guide](docs/personal-guide.html) for a visual overview a
 
 ## Move selected files and folders to Trash
 
+Version `0.3.2` handles `⌘+Backspace` directly in the app window, independently of menu shortcut dispatch. Install the [updated DMG](https://github.com/konslie/Ko_SmallApps/releases/tag/kq-dir-v0.3.2). Text editing and customized shortcut bindings remain supported.
+
 Select one or more files or folders in list or tree view, then press **`⌘` + `Backspace` (`⌘⌫`)**. The selection in the active pane moves to the macOS Trash. On a Mac keyboard, use the backward-delete key labeled `delete` or `⌫`.
 
 The same action is available through **Edit → Move to Trash**. While editing a filename or search text, the shortcut applies to the text being edited. If you have customized shortcuts, check **`⌘,` → Shortcuts → Move to Trash** for the current binding.
 
 ## Requirements
 
-- macOS 14 or later
-- Xcode and Xcode Command Line Tools
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- Running the app: macOS 14 or later; Xcode is not required.
+- Building from source: Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen), or compatible standalone Command Line Tools with Swift 5.10 or later.
+
+## Install: DMG or Command Line Tools
+
+The [kq-dir v0.3.2 release](https://github.com/konslie/Ko_SmallApps/releases/tag/kq-dir-v0.3.2) provides two options:
+
+- **DMG:** open `kq-dir-v0.3.2.dmg` and drag the app into Applications. The binary includes Apple silicon and Intel architectures.
+- **Build with CLT:** extract `kq-dir-v0.3.2-clt-source.zip` and run the commands below. You can also clone the GitHub repository and run the same commands from `kq-dir/`.
+
+```bash
+cd kq-dir
+bash Scripts/build-clt.sh --version 0.3.2 --build-number 10
+open /tmp/kq-dir-build/clt/kq-dir.app
+```
+
+Both paths use ad-hoc signing without Apple notarization. Neither overrides company execution policies. See the [installation guide (Korean)](docs/install.md) for CLT setup, SDK compatibility, first launch, and validation limits.
 
 ## Local Debug build
 
@@ -49,7 +65,7 @@ swift test
 xcodebuild -scheme mq-dir -configuration Debug -derivedDataPath DerivedData test -only-testing:mq-dir-service-tests
 ```
 
-`swift test` covers the core library; `mq-dir-service-tests` covers app services.
+`swift test` covers the core library; `mq-dir-service-tests` covers app services. Run these tests with Xcode selected, because standalone CLT installations may not include XCTest. XCTest is not needed to build the app.
 
 ## Storage and external connections
 
