@@ -3,6 +3,23 @@ import XCTest
 
 final class CutPasteboardTests: XCTestCase {
     @MainActor
+    func testCopyAndCutReplaceBothURLsAndMode() {
+        let pb = NSPasteboard(name: .init(UUID().uuidString))
+        defer { pb.releaseGlobally() }
+        let copied = URL(fileURLWithPath: "/tmp/mqdir-copied.txt")
+        let cut = URL(fileURLWithPath: "/tmp/mqdir-cut.txt")
+
+        CutPasteboard.write([copied], cutting: false, to: pb)
+        CutPasteboard.write([cut], cutting: true, to: pb)
+        XCTAssertEqual(pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], [cut])
+        XCTAssertTrue(pb.types?.contains(CutPasteboard.markerType) == true)
+
+        CutPasteboard.write([copied], cutting: false, to: pb)
+        XCTAssertEqual(pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], [copied])
+        XCTAssertFalse(pb.types?.contains(CutPasteboard.markerType) == true)
+    }
+
+    @MainActor
     func testMoveCompletionPreservesNewClipboardContents() {
         let pb = NSPasteboard(name: .init(UUID().uuidString))
         defer { pb.releaseGlobally() }

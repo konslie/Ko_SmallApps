@@ -2,21 +2,13 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Routes a tab drop to `paneVM.move`. The drop "happens" when the user
-/// hovers over a target tab (`dropEntered`) — that gives the immediate
-/// drag-to-reorder feel like Safari, instead of waiting for `performDrop`
-/// which only fires on mouseUp. `performDrop` returns true so SwiftUI
-/// considers the drop accepted and clears the drag state.
-/// Chrome-style tab drop delegate.
-///
-/// Hover over a tab → an insertion-line indicator appears (blue 2pt
-/// vertical bar) and the cursor's horizontal position decides whether
-/// the line snaps to the leading or trailing edge of the hovered chip.
-/// The actual reorder doesn't run until `performDrop`, so the bar
-/// doesn't shuffle around as the user drags — it only moves the once,
-/// where the user told it to land. Cross-pane drops decode the source
-/// pane via `TabDragCoordinator` and detach + attach in one step.
-private struct TabReorderDropDelegate: DropDelegate {
+/// One drop target per chip so file transfers and tab reordering cannot
+/// compete for the same drop. A tab drag also carries its folder URL.
+@MainActor
+private struct TabDropDelegate: DropDelegate {
+    static let tabType = UTType.plainText.identifier
+    static let types = [tabType] + DragDropSupport.acceptedDropTypes
+
     let paneVM: PaneTabsViewModel
     let paneIndex: Int
     /// Insertion index this delegate represents, computed from hover
@@ -26,12 +18,33 @@ private struct TabReorderDropDelegate: DropDelegate {
     let resolveInsertionIndex: (DropInfo) -> Int
     @Binding var insertionPreview: Int?
     @Binding var draggingID: ObjectIdentifier?
+    var fileTarget: FolderBrowserViewModel? = nil
+    var normalizeHangul = false
+    var setFileHighlight: (Bool) -> Void = { _ in }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        if isTabDrag(info) { return true }
+        return fileTarget?.folderURL != nil
+            && info.hasItemsConforming(to: DragDropSupport.acceptedDropTypes)
+    }
+
+    private func isTabDrag(_ info: DropInfo) -> Bool {
+        TabDragCoordinator.shared.sourceTabID != nil
+            && info.hasItemsConforming(to: [Self.tabType])
+    }
 
     func dropEntered(info: DropInfo) {
-        insertionPreview = resolveInsertionIndex(info)
+        if isTabDrag(info) {
+            insertionPreview = resolveInsertionIndex(info)
+        } else {
+            setFileHighlight(true)
+        }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        // The app handles the transfer itself. A copy proposal keeps a drag
+        // source from independently removing items after a successful drop.
+        guard isTabDrag(info) else { return DropProposal(operation: .copy) }
         let next = resolveInsertionIndex(info)
         if insertionPreview != next { insertionPreview = next }
         return DropProposal(operation: .move)
@@ -39,10 +52,25 @@ private struct TabReorderDropDelegate: DropDelegate {
 
     func dropExited(info: DropInfo) {
         insertionPreview = nil
+        setFileHighlight(false)
     }
 
-    @MainActor
     func performDrop(info: DropInfo) -> Bool {
+        if !isTabDrag(info) {
+            setFileHighlight(false)
+            guard let fileTarget, let folder = fileTarget.folderURL else { return false }
+            let providers = info.itemProviders(for: DragDropSupport.acceptedDropTypes)
+            guard !providers.isEmpty else { return false }
+            let copy = NSEvent.modifierFlags.contains(.option)
+            let pendingURLs = DragDropSupport.beginResolvingURLs(from: providers)
+            Task {
+                let urls = await pendingURLs.value
+                guard !urls.isEmpty else { return }
+                fileTarget.acceptDrop(urls, into: folder, copy: copy, normalizeHangul: normalizeHangul)
+            }
+            return true
+        }
+
         let coord = TabDragCoordinator.shared
         let insertionIndex = resolveInsertionIndex(info)
         let sourceTabID = coord.sourceTabID
@@ -94,6 +122,7 @@ struct BrowserPaneView: View {
 
     @State private var paneIsDropTargeted = false
     @State private var rowDropTargeted: FileEntry.ID?
+    @State private var fileDropTabID: ObjectIdentifier?
     /// Where the blue insertion-line indicator should render in this
     /// pane's tab bar while a tab is being dragged over it. `nil` =
     /// no preview (no drag in this pane). `0` = before the first tab,
@@ -151,7 +180,7 @@ struct BrowserPaneView: View {
             // Drag finished (drop or cancel) → wipe any leftover
             // insertion marker AND restore the dragged tab's opacity.
             // The `draggingTabID = nil` reset used to live only inside
-            // `TabReorderDropDelegate.performDrop`, so a drop landing
+            // `TabDropDelegate.performDrop`, so a drop landing
             // on a non-tab target (e.g. Favorites in the sidebar)
             // left the source tab stuck at 0.35 opacity. The
             // coordinator's `sourceTabID` is now the single source of
@@ -184,7 +213,6 @@ struct BrowserPaneView: View {
         Divider()
 
         Button("Paste") { viewModel.pasteFromPasteboard(normalizeHangul: normalizeHangulOnDragOut) }
-            .keyboardShortcut("v", modifiers: .command)
             .disabled(!viewModel.canPasteFiles || viewModel.folderURL == nil)
 
         Divider()
@@ -316,8 +344,8 @@ struct BrowserPaneView: View {
             .frame(width: 1, height: Theme.Metrics.tabBarHeight)
             .contentShape(Rectangle())
             .onDrop(
-                of: [UTType.plainText.identifier],
-                delegate: TabReorderDropDelegate(
+                of: [TabDropDelegate.tabType],
+                delegate: TabDropDelegate(
                     paneVM: paneVM,
                     paneIndex: index,
                     resolveInsertionIndex: { _ in paneVM.tabs.count },
@@ -406,35 +434,14 @@ struct BrowserPaneView: View {
                 }
             }
         }
-        // Drag source: ship the tab id as `public.text` but with
-        // `.ownProcess` visibility so external destinations (cmux,
-        // terminals, text editors) don't see the drag at all and
-        // therefore can't paste the literal `ObjectIdentifier(0x…)`
-        // string. The actual reorder routing reads
-        // `TabDragCoordinator.shared` (which knows source pane +
-        // tab id) rather than the pasteboard payload — the string is
-        // only here to satisfy SwiftUI's drop-type matching.
-        //
-        // The tab's folder URL also rides along (same `.ownProcess`
-        // visibility) so dropping a tab onto the sidebar's Favorites
-        // section adds that folder — Favorites' existing drop handler
-        // already accepts `public.file-url`. Tab-reorder drop targets
-        // only match `plainText`, so the extra URL representation is
-        // a no-op for them.
+        // Keep the reorder marker in-process. The folder URL also lets the
+        // tab be dragged to Favorites or an external app.
         .onDrag {
             draggingTabID = id
             TabDragCoordinator.shared.begin(sourcePaneIndex: index, tabID: id)
             let provider = NSItemProvider()
-            provider.registerObject(
-                String(describing: id) as NSString,
-                visibility: .ownProcess
-            )
+            provider.registerObject(String(describing: id) as NSString, visibility: .ownProcess)
             if let folderURL = tab.folderURL {
-                // Default `.all` visibility so external destinations
-                // (Finder, Terminal, etc.) can also receive the URL
-                // when the user drags a tab outside the window — the
-                // tab id NSString above stays `.ownProcess` so the
-                // raw `ObjectIdentifier(0x…)` literal never escapes.
                 provider.registerObject(folderURL as NSURL, visibility: .all)
             }
             return provider
@@ -447,10 +454,18 @@ struct BrowserPaneView: View {
                     .onChange(of: geo.size.width) { _, new in tabChipWidths[idx] = new }
             }
         )
+        .overlay {
+            if fileDropTabID == id, tab.folderURL != nil {
+                Rectangle()
+                    .fill(Theme.Color.accent.opacity(0.22))
+                    .overlay(Rectangle().strokeBorder(Theme.Color.accent, lineWidth: 2))
+                    .allowsHitTesting(false)
+            }
+        }
         .opacity(draggingTabID == id ? 0.35 : 1)
         .onDrop(
-            of: [UTType.plainText.identifier],
-            delegate: TabReorderDropDelegate(
+            of: TabDropDelegate.types,
+            delegate: TabDropDelegate(
                 paneVM: paneVM,
                 paneIndex: index,
                 resolveInsertionIndex: { info in
@@ -458,7 +473,13 @@ struct BrowserPaneView: View {
                     return info.location.x < width / 2 ? idx : idx + 1
                 },
                 insertionPreview: $tabDropInsertionIndex,
-                draggingID: $draggingTabID
+                draggingID: $draggingTabID,
+                fileTarget: tab,
+                normalizeHangul: normalizeHangulOnDragOut,
+                setFileHighlight: { targeted in
+                    if targeted { fileDropTabID = id }
+                    else if fileDropTabID == id { fileDropTabID = nil }
+                }
             )
         )
     }

@@ -1332,9 +1332,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func copySelectionToPasteboard() {
         let urls = selectedURLs
         guard !urls.isEmpty else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects(urls.map { $0 as NSURL })
+        CutPasteboard.write(urls, cutting: false, to: .general)
     }
 
     /// Cut: same as copy but marks the pasteboard so a subsequent
@@ -1348,10 +1346,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func cutSelectionToPasteboard() {
         let urls = selectedURLs
         guard !urls.isEmpty else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects(urls.map { $0 as NSURL })
-        pb.setData(Data(), forType: Self.cutMarkerType)
+        CutPasteboard.write(urls, cutting: true, to: .general)
     }
 
     /// Pasteboard type that marks a cut operation. Empty data — only
@@ -1369,11 +1364,13 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard let sources = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !sources.isEmpty else { return }
         let isCut = pb.types?.contains(Self.cutMarkerType) == true
         var revision = pb.changeCount
+        var remaining = sources
         let request = FileWorkRequest(kind: isCut ? .move : .copy, sources: sources,
             destination: folder, normalizeHangul: normalizeHangul)
         FileWorkCenter.shared.submit(request) { outcomes in
             guard isCut, pb.changeCount == revision else { return }
-            let remaining = outcomes.filter { $0.status != .succeeded }.flatMap(\.sources)
+            let moved = Set(outcomes.filter { $0.status == .succeeded }.flatMap(\.sources))
+            remaining.removeAll { moved.contains($0) }
             CutPasteboard.complete(pb, changeCount: revision, remainingURLs: remaining)
             revision = pb.changeCount
         }

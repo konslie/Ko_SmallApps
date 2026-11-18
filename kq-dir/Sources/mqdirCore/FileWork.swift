@@ -129,7 +129,9 @@ extension FileOperationService {
         normalizeHangul: Bool = false, fileManager: FileManager = .default, recordUndo: Bool = false, cancellation: ProcessRunner.Cancellation = .init()
     ) -> FileWorkOutcome {
         var target = folder.appendingPathComponent(source.lastPathComponent)
-        if source.standardizedFileURL == target.standardizedFileURL && !duplicateInPlace {
+        let folderPath = folder.resolvingSymlinksInPath().standardizedFileURL.path
+        let sourceParent = source.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path
+        if sourceParent == folderPath && !duplicateInPlace {
             return FileWorkOutcome(sources: [source], destination: source, status: .skipped("Already in this folder"))
         }
         let sourceParts = source.resolvingSymlinksInPath().standardizedFileURL.pathComponents

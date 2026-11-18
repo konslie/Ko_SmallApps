@@ -2,7 +2,7 @@ import Foundation
 
 /// Cross-pane tab drag bookkeeping.
 ///
-/// Tab reorder lives in `TabReorderDropDelegate` but had no way to learn
+/// Tab reorder lives in `TabDropDelegate` but had no way to learn
 /// which pane the dragged chip came from — a per-pane `@State` binding
 /// only sees same-pane drags. This singleton remembers (sourcePane,
 /// tabID) for the duration of a drag so a drop on a different pane can

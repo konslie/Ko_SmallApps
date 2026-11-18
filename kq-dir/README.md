@@ -10,6 +10,8 @@ A personal macOS file manager for working with multiple folders in one window. E
 - **Tabs:** use `⌘T` or `+` for an empty tab. Double-click a tab to duplicate it to the right, or middle-click to close it. Closing the last tab leaves an empty `Untitled` tab.
 - **Open folders in tabs:** middle-click or `⌘`-double-click a folder in list or tree view; `⌘`+`Enter` opens the selected folder in a new tab.
 - **Keep the current tab:** opening, duplicating, or reopening a tab leaves the current tab selected. Click the new tab to switch to it.
+- **Drop files onto tabs:** drop selected files and folders from the list onto another tab to send them to that tab’s folder. Items move on the same volume and copy across volumes or when you hold `Option`. The target is highlighted and the active tab stays selected. Use `⌘Z` to undo a recent transfer.
+- **Cut and paste:** use `⌘X` on selected items, then `⌘V` in the destination folder to move them. Failed or skipped items stay on the clipboard so you can paste them into another folder.
 - **File operations:** copy, cut, paste, rename, duplicate, move to Trash, compress, and extract. Failures are reported separately; the toolbar's **File operations** button shows progress and results.
 - **Search and preview:** search folders and their descendants and preview PDFs, images, Markdown, ZIP contents, and other formats supported by macOS Quick Look.
 - **Projects and favorites:** keep frequently used folders in the sidebar and save pane and tab layouts by project.

@@ -21,45 +21,53 @@ enum DragDropSupport {
     // (WebKit / cmux / browsers) end up with a cache copy instead of
     // the original path.
 
-    /// Resolve an array of incoming NSItemProviders to file URLs. Prefers our
-    /// private multi-selection type when present; otherwise falls back to the
-    /// standard `public.file-url`.
     static func resolveURLs(from providers: [NSItemProvider]) async -> [URL] {
-        var resolved: [URL] = []
-
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(mqdirSelectionTypeIdentifier),
-               let multi = await loadMultiSelection(from: provider) {
-                resolved.append(contentsOf: multi)
-                continue
-            }
-            if let url = await loadFileURL(from: provider) {
-                resolved.append(url)
-            }
-        }
-
-        return resolved
+        await beginResolvingURLs(from: providers).value
     }
 
-    private static func loadMultiSelection(from provider: NSItemProvider) async -> [URL]? {
-        await withCheckedContinuation { continuation in
-            provider.loadDataRepresentation(forTypeIdentifier: mqdirSelectionTypeIdentifier) { data, _ in
-                guard let data,
-                      let strings = try? JSONDecoder().decode([String].self, from: data)
-                else {
-                    continuation.resume(returning: nil)
-                    return
+    /// Start each provider load before the drop callback returns. Keep the
+    /// drag order even when providers finish out of order.
+    static func beginResolvingURLs(from providers: [NSItemProvider]) -> Task<[URL], Never> {
+        let loads = providers.map { provider in
+            let files = AsyncStream<URL>.makeStream()
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                provider.loadObject(ofClass: NSURL.self) { object, _ in
+                    if let url = object as? URL, url.isFileURL {
+                        files.continuation.yield(url)
+                    }
+                    files.continuation.finish()
                 }
-                continuation.resume(returning: strings.compactMap { URL(string: $0) })
+            } else {
+                files.continuation.finish()
             }
-        }
-    }
 
-    private static func loadFileURL(from provider: NSItemProvider) async -> URL? {
-        await withCheckedContinuation { continuation in
-            _ = provider.loadObject(ofClass: NSURL.self) { obj, _ in
-                continuation.resume(returning: obj as? URL)
+            let selection = AsyncStream<[URL]>.makeStream()
+            if provider.hasItemConformingToTypeIdentifier(mqdirSelectionTypeIdentifier) {
+                provider.loadDataRepresentation(forTypeIdentifier: mqdirSelectionTypeIdentifier) { data, _ in
+                    if let data, let strings = try? JSONDecoder().decode([String].self, from: data) {
+                        let urls = strings.compactMap { URL(string: $0) }.filter(\.isFileURL)
+                        if !urls.isEmpty { selection.continuation.yield(urls) }
+                    }
+                    selection.continuation.finish()
+                }
+            } else {
+                selection.continuation.finish()
             }
+            return (selection.stream, files.stream)
+        }
+
+        return Task {
+            var urls: [URL] = []
+            for (selection, files) in loads {
+                var iterator = selection.makeAsyncIterator()
+                if let batch = await iterator.next() {
+                    urls.append(contentsOf: batch)
+                } else {
+                    for await url in files { urls.append(url) }
+                }
+            }
+            var seen: Set<String> = []
+            return urls.filter { seen.insert($0.standardizedFileURL.path).inserted }
         }
     }
 
