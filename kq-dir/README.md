@@ -1,43 +1,31 @@
 # kq-dir
 
-A personal macOS file manager for working with multiple folders in one window. Each pane has its own folder and tabs, and projects preserve separate workspace layouts.
+오픈소스 macOS 파일 관리자 [mq-dir](https://github.com/h5nam/mq-dir)(제작: h5nam)를 가져와 몇 가지 기능을 추가하고 일부를 덜어낸 **개인용 비상업 버전**입니다. 업스트림 커밋 `399999d`에서 시작했습니다.
 
-[한국어](README.ko.md) · [Korean feature guide](docs/personal-guide.html)
+## 추가·변경한 점
 
-## Features
+- **탭에 파일 드롭:** 목록에서 선택한 파일·폴더를 다른 탭으로 드래그하면 그 탭의 폴더로 보냅니다. 같은 볼륨이면 이동, 다른 볼륨이거나 `Option`을 누르면 복사합니다. `⌘Z`로 직전 전송을 되돌릴 수 있습니다.
+- **잘라내기·붙여넣기:** 항목을 선택하고 `⌘X`, 대상 폴더에서 `⌘V`를 누르면 이동합니다. 실패하거나 건너뛴 항목은 클립보드에 남습니다.
+- **휴지통 단축키:** `⌘⌫`로 선택 항목을 휴지통으로 보냅니다.
+- **파일 작업 현황:** 복사·이동·압축 등의 진행 상황과 실패 내역을 툴바의 **File operations** 버튼에서 봅니다.
+- **제거한 기능:** 업스트림의 자동 업데이트와 피드백 전송.
+- **개인용 안내서:** [한글 기능 가이드](docs/personal-guide.html)
 
-- **Up to four panes:** choose a single pane, side-by-side or stacked two-pane layout, three panes, or four panes. Each pane maintains its own folders and tabs.
-- **Tabs:** use `⌘T` or `+` for an empty tab. Double-click a tab to duplicate it to the right, or middle-click to close it. Closing the last tab leaves an empty `Untitled` tab.
-- **Open folders in tabs:** middle-click or `⌘`-double-click a folder in list or tree view; `⌘`+`Enter` opens the selected folder in a new tab.
-- **Keep the current tab:** opening, duplicating, or reopening a tab leaves the current tab selected. Click the new tab to switch to it.
-- **Drop files onto tabs:** drop selected files and folders from the list onto another tab to send them to that tab’s folder. Items move on the same volume and copy across volumes or when you hold `Option`. The target is highlighted and the active tab stays selected. Use `⌘Z` to undo a recent transfer.
-- **Cut and paste:** use `⌘X` on selected items, then `⌘V` in the destination folder to move them. Failed or skipped items stay on the clipboard so you can paste them into another folder.
-- **File operations:** copy, cut, paste, rename, duplicate, move to Trash, compress, and extract. Failures are reported separately; the toolbar's **File operations** button shows progress and results.
-- **Search and preview:** search folders and their descendants and preview PDFs, images, Markdown, ZIP contents, and other formats supported by macOS Quick Look.
-- **Projects and favorites:** keep frequently used folders in the sidebar and save pane and tab layouts by project.
-- **Settings:** use `⌘,` to choose system, light, or dark appearance and customize shortcuts. Custom color themes are not yet available.
+## 기본 기능
 
-See the [Korean feature guide](docs/personal-guide.html) for a visual overview and shortcuts.
+- 최대 4개 창(pane), 창마다 폴더와 탭을 따로 가집니다.
+- 탭 열기·복제·닫기, 폴더 새 탭으로 열기(가운데 클릭, `⌘`+더블클릭, `⌘`+`Enter`)
+- 복사, 이름 변경, 복제, 압축·해제
+- 하위 폴더 포함 검색, PDF·이미지·Markdown·ZIP 등 미리보기
+- 사이드바 즐겨찾기, 프로젝트별 창·탭 배치 저장
+- `⌘,`에서 설정과 단축키 변경
 
-## Move selected files and folders to Trash
+## 설치
 
-Version `0.3.2` handles `⌘+Backspace` directly in the app window, independently of menu shortcut dispatch. Install the [updated DMG](https://github.com/konslie/Ko_SmallApps/releases/tag/kq-dir-v0.3.2). Text editing and customized shortcut bindings remain supported.
+macOS 14 이상에서 실행됩니다. 앱을 쓰는 데 Xcode는 필요 없습니다.
 
-Select one or more files or folders in list or tree view, then press **`⌘` + `Backspace` (`⌘⌫`)**. The selection in the active pane moves to the macOS Trash. On a Mac keyboard, use the backward-delete key labeled `delete` or `⌫`.
-
-The same action is available through **Edit → Move to Trash**. While editing a filename or search text, the shortcut applies to the text being edited. If you have customized shortcuts, check **`⌘,` → Shortcuts → Move to Trash** for the current binding.
-
-## Requirements
-
-- Running the app: macOS 14 or later; Xcode is not required.
-- Building from source: Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen), or compatible standalone Command Line Tools with Swift 5.10 or later.
-
-## Install: DMG or Command Line Tools
-
-The [kq-dir v0.3.2 release](https://github.com/konslie/Ko_SmallApps/releases/tag/kq-dir-v0.3.2) provides two options:
-
-- **DMG:** open `kq-dir-v0.3.2.dmg` and drag the app into Applications. The binary includes Apple silicon and Intel architectures.
-- **Build with CLT:** extract `kq-dir-v0.3.2-clt-source.zip` and run the commands below. You can also clone the GitHub repository and run the same commands from `kq-dir/`.
+- **DMG:** [v0.3.2 릴리스](https://github.com/konslie/Ko_SmallApps/releases/tag/kq-dir-v0.3.2)에서 `kq-dir-v0.3.2.dmg`를 받아 앱을 Applications로 옮깁니다.
+- **소스 빌드(Command Line Tools):**
 
 ```bash
 cd kq-dir
@@ -45,36 +33,12 @@ bash Scripts/build-clt.sh --version 0.3.2 --build-number 10
 open /tmp/kq-dir-build/clt/kq-dir.app
 ```
 
-Both paths use ad-hoc signing without Apple notarization. Neither overrides company execution policies. See the [installation guide (Korean)](docs/install.md) for CLT setup, SDK compatibility, first launch, and validation limits.
+임시 서명(ad-hoc)만 되어 있고 Apple 공증은 받지 않았습니다. 회사 실행 정책은 우회하지 않습니다. 자세한 절차는 [설치 안내](docs/install.md)를 참고하세요.
 
-## Local Debug build
+## 저장 위치와 외부 통신
 
-After cloning this repository, run from the `kq-dir` directory:
+프로젝트, 탭, 즐겨찾기, 설정은 `~/Library/Application Support/com.konslie.mqdir/state.json`에 저장됩니다. Markdown 미리보기의 원격 이미지는 기본으로 차단되며, **Load external images**를 선택할 때만 해당 서버에 요청합니다.
 
-```bash
-cd kq-dir
-Scripts/generate-project.sh
-xcodebuild -scheme mq-dir -configuration Debug -derivedDataPath DerivedData build
-open DerivedData/Build/Products/Debug/kq-dir.app
-```
+## 라이선스
 
-The generated project and scheme retain the `mq-dir` build names; the app is named `kq-dir`. Install XcodeGen with `brew install xcodegen` if needed.
-
-## Tests
-
-```bash
-swift test
-xcodebuild -scheme mq-dir -configuration Debug -derivedDataPath DerivedData test -only-testing:mq-dir-service-tests
-```
-
-`swift test` covers the core library; `mq-dir-service-tests` covers app services. Run these tests with Xcode selected, because standalone CLT installations may not include XCTest. XCTest is not needed to build the app.
-
-## Storage and external connections
-
-Projects, tabs, favorites, and settings are stored in `~/Library/Application Support/com.konslie.mqdir/state.json`. The upstream automatic updater and feedback submission features have been removed. Remote images in Markdown previews are blocked by default; selecting **Load external images** sends requests to the relevant image servers.
-
-## Attribution and license
-
-kq-dir is a personal, non-commercial version based on the open-source [mq-dir](https://github.com/h5nam/mq-dir) by **h5nam**, starting from upstream commit `399999d`.
-
-The original copyright notice and MIT license are preserved in [LICENSE](LICENSE). Copyright © 2026 mq-dir contributors.
+원본 mq-dir의 MIT 라이선스와 저작권 표기를 그대로 유지합니다. [LICENSE](LICENSE) 참고. Copyright © 2026 mq-dir contributors.
